@@ -1,0 +1,36 @@
+# ── Core ──────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+pydantic-settings
+
+# ── Database ──────────────────────────────────────────────────
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pgvector
+
+# ── AI ────────────────────────────────────────────────────────
+anthropic
+langchain
+langchain-anthropic
+langchain-community
+langgraph
+ollama
+
+# ── Utilities ─────────────────────────────────────────────────
+httpx
+python-multipart
+PyPDF2
+aiofiles
+
+# ── Background tasks ──────────────────────────────────────────
+apscheduler
+
+# ── Storage ───────────────────────────────────────────────────
+supabase
+
+# ── Auth ──────────────────────────────────────────────────────
+PyJWT
+cryptography
