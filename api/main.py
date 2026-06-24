@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base
-from routers.chat import router as chat_router # type: ignore
-from routers.google_auth import router as google_auth_router # type: ignore
+from routers.chat import router as chat_router 
+from routers.google_auth import router as google_auth_router 
 from routers.spotify_auth import router as spotify_auth_router
 
 # Import models so SQLAlchemy registers them before create_all
