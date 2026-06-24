@@ -58,6 +58,36 @@ def search_maps(query: str) -> str:
 
 
 @tool
+def reverse_geocode(coords: str) -> str:
+    """Convert GPS coordinates to a human-readable location (city, region, country).
+    Use when the user asks 'where am I', 'what city am I in', 'what's my location'.
+    coords: 'latitude,longitude' string from the user's location context."""
+    try:
+        lat, lng = [p.strip() for p in coords.split(",", 1)]
+        resp = httpx.get(
+            "https://maps.googleapis.com/maps/api/geocode/json",
+            params={"latlng": f"{lat},{lng}", "key": settings.GOOGLE_MAPS_API_KEY},
+            timeout=8,
+        )
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            return "Could not determine location from these coordinates."
+        components = results[0].get("address_components", [])
+        locality    = next((c["long_name"] for c in components if "locality" in c["types"]), "")
+        sublocality = next((c["long_name"] for c in components if "sublocality" in c["types"]), "")
+        admin       = next((c["long_name"] for c in components if "administrative_area_level_1" in c["types"]), "")
+        country     = next((c["long_name"] for c in components if "country" in c["types"]), "")
+        city = locality or sublocality
+        parts = [p for p in [city, admin, country] if p]
+        if parts:
+            return "You're in " + ", ".join(parts) + "."
+        return results[0].get("formatted_address", "Location not found.")
+    except Exception as e:
+        return f"Geocoding failed: {e}"
+
+
+@tool
 def get_directions(origin: str, destination: str) -> str:
     """Get distance and travel time between two places. Returns distance and duration as text.
     Use this when the user asks how far, how long, or for directions."""

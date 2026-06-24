@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -17,12 +18,12 @@ interface Message {
 }
 
 const SUGGESTIONS = [
+  "Open Chrome",
+  "Set volume to 50%",
+  "Take a screenshot",
   "What tasks do I have today?",
-  "Remind me to call Mom at 6 PM",
-  "Schedule a meeting tomorrow at 3 PM",
   "What's on my calendar this week?",
-  "Search my notes for project ideas",
-  "What should I work on next?",
+  "Open my Downloads folder",
 ];
 
 // ── Web Speech API types ───────────────────────────────────────────────────────
@@ -51,10 +52,8 @@ declare global {
 
 function isWakeWord(text: string): boolean {
   const t = text.toLowerCase().trim();
-  // "edith" and common mishearings
   if (t.includes("edith")) return true;
   if ((t.includes("hey") || t.includes("hi") || t.includes("ok")) && (t.includes("edit") || t.includes("edie"))) return true;
-  // Standalone wake phrases
   if (t === "hey" || t.startsWith("hey ")) return true;
   if (t === "listen" || t.startsWith("listen ")) return true;
   if (t.includes("wake up")) return true;
@@ -63,7 +62,9 @@ function isWakeWord(text: string): boolean {
 }
 
 function isStopWord(text: string): boolean {
-  return /\b(stop|shut up|quiet|enough|silence|stop talking|ok stop|that'?s enough)\b/i.test(text);
+  return /^(stop|stop it|stop talking|enough|that'?s enough|shut up|quiet|silence|ok stop|cancel|nevermind|never mind|pause|be quiet|zip it|cut it out|alright stop|okay stop)$/i.test(
+    text.toLowerCase().trim()
+  );
 }
 
 function stripWakeWord(text: string): string {
@@ -99,7 +100,7 @@ export function ChatWindow() {
       id: "welcome",
       role: "assistant",
       content:
-        'Hey — I\'m EDITH, your personal assistant. Tell me what you need: tasks, reminders, calendar, or search your notes. I can hear you too — tap the mic or say "Hey EDITH".',
+        'Hey — I\'m EDITH. I can open apps, control volume, take screenshots, lock your screen, manage tasks and calendar, play music, check weather, and more. Tap the mic or say "Hey EDITH" to start.',
     },
   ]);
   const [input, setInput] = useState("");
@@ -153,6 +154,53 @@ export function ChatWindow() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, activeTools]);
+
+  // ── Incoming call monitor ───────────────────────────────────────────────────
+  useEffect(() => {
+    let es: EventSource;
+    let retryTimer: ReturnType<typeof setTimeout>;
+    let alive = true;
+
+    const connect = () => {
+      if (!alive) return;
+      es = new EventSource(`${API_BASE}/api/v1/calls/stream`);
+
+      es.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+          if (evt.type === "incoming_call") {
+            const caller = evt.caller && evt.caller !== "Unknown" ? evt.caller : "someone";
+            const notice = `Incoming call from ${caller}. Say answer or decline.`;
+            setMessages((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), role: "assistant", content: notice, tools: [] },
+            ]);
+            if (voiceEnabledRef.current) {
+              window.speechSynthesis?.cancel();
+              const utt = new SpeechSynthesisUtterance(notice);
+              utt.rate = 1.0;
+              utt.onend = () => setTimeout(() => startWakeListeningRef.current?.(), 300);
+              window.speechSynthesis.speak(utt);
+            }
+          }
+        } catch {}
+      };
+
+      // Auto-reconnect on error instead of closing permanently
+      es.onerror = () => {
+        es.close();
+        if (alive) retryTimer = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+    return () => {
+      alive = false;
+      clearTimeout(retryTimer);
+      es?.close();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const startWakeListeningRef = useRef<(() => void) | null>(null);
   const sendRef = useRef<((text: string) => void) | null>(null);
@@ -274,6 +322,15 @@ export function ChatWindow() {
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
+
+      // Stop words cancel speech without hitting the API
+      if (isStopWord(trimmed)) {
+        window.speechSynthesis?.cancel();
+        setInput("");
+        if (wakeModeRef.current) setTimeout(() => startWakeListeningRef.current?.(), 400);
+        return;
+      }
+
       if (loadingRef.current) {
         if (wakeModeRef.current) setTimeout(() => startWakeListeningRef.current?.(), 500);
         return;
@@ -343,13 +400,13 @@ export function ChatWindow() {
               } else if (evt.type === "tool_end") {
                 const endTool = evt.tool as string;
                 const output = (evt.output ?? "") as string;
-                const phoneMatch = output.match(/[\+\d][\d\s\-\(\)]{6,}/);
-                if (phoneMatch) {
-                  const number = phoneMatch[0].replace(/[\s\-\(\)]/g, "");
-                  if (endTool === "call_contact") {
-                    window.location.href = `tel:${number}`;
-                  } else if (endTool === "message_contact") {
-                    window.location.href = `sms:${number}`;
+                // call_contact: backend now triggers tel: via ShellExecuteW — no frontend action needed
+                // message_contact: still needs sms: link from frontend
+                if (endTool === "message_contact") {
+                  const phoneMatch = output.match(/[\+\d][\d\s\-\(\)]{6,}/);
+                  if (phoneMatch) {
+                    const number = phoneMatch[0].replace(/[\s\-\(\)]/g, "");
+                    window.open(`sms:${number}`, "_blank");
                   }
                 }
                 setActiveTools((t) => t.slice(1));
@@ -748,7 +805,7 @@ export function ChatWindow() {
           style={{ color: "rgba(255,241,181,0.12)" }}
         >
           Enter to send · Shift+Enter for new line ·{" "}
-          {wakeMode ? '"Hey EDITH" to activate' : "mic for voice"}
+          {wakeMode ? '"Hey EDITH" to activate · say "stop" to silence' : 'mic for voice · say "stop" to silence'}
         </p>
       </div>
     </div>

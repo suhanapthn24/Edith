@@ -30,3 +30,12 @@ httpx
 python-multipart
 aiofiles
 PyPDF2
+
+# System navigation
+psutil
+Pillow
+pycaw
+comtypes
+pyautogui
+pygetwindow
+pywin32

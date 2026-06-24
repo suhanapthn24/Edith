@@ -16,10 +16,16 @@ from agent.tools.reminders import create_reminder, list_reminders, complete_remi
 from agent.tools.google_calendar import list_calendar_events, create_calendar_event, delete_calendar_event
 from agent.tools.gmail import list_emails, get_email, send_email
 from agent.tools.rag import search_knowledge, add_note
-from agent.tools.browser import open_url, search_youtube, search_web, search_maps, get_directions
+from agent.tools.browser import open_url, search_youtube, search_web, search_maps, get_directions, reverse_geocode
 from agent.tools.spotify import search_spotify, play_spotify, control_playback, get_current_track, get_top_tracks, add_to_queue
 from agent.tools.google_contacts import search_contacts, call_contact, message_contact
 from agent.tools.weather import get_weather, get_forecast
+from agent.tools.calls import answer_call, decline_call
+from agent.tools.system_nav import (
+    open_app, close_app, list_running_apps,
+    open_file_or_folder, find_files, download_file,
+    set_volume, get_system_info, lock_screen, take_screenshot,
+)
 
 
 class EDITHState(TypedDict):
@@ -38,13 +44,19 @@ TOOLS = [
     # Knowledge base
     search_knowledge, add_note,
     # Browser actions (frontend opens the URL/tab)
-    open_url, search_youtube, search_web, search_maps, get_directions,
+    open_url, search_youtube, search_web, search_maps, get_directions, reverse_geocode,
     # Spotify
     search_spotify, play_spotify, control_playback, get_current_track, get_top_tracks, add_to_queue,
     # Google Contacts & communication
     search_contacts, call_contact, message_contact,
     # Weather
     get_weather, get_forecast,
+    # Calls
+    answer_call, decline_call,
+    # System navigation (Windows)
+    open_app, close_app, list_running_apps,
+    open_file_or_folder, find_files, download_file,
+    set_volume, get_system_info, lock_screen, take_screenshot,
 ]
 
 if settings.OPENROUTER_API_KEY:
@@ -53,7 +65,7 @@ if settings.OPENROUTER_API_KEY:
         base_url="https://openrouter.ai/api/v1",
         api_key=settings.OPENROUTER_API_KEY,
         temperature=0.3,
-        max_tokens=400,
+        max_tokens=1024,
     )
 else:
     llm = ChatOllama(
@@ -72,7 +84,7 @@ SYSTEM = """\
 You are EDITH, a personal AI assistant. Be direct and act immediately.
 Today: {dt}
 {location_ctx}
-Tools available: tasks, reminders, Google Calendar, Gmail, knowledge base, browser (YouTube/web/maps), Spotify, Google Contacts, weather.
+Tools available: tasks, reminders, Google Calendar, Gmail, knowledge base, browser (YouTube/web/maps), Spotify, Google Contacts, weather, system (open/close apps, files, volume, screenshot, lock, download).
 
 Rules:
 1. Call tools immediately — never ask for confirmation unless truly ambiguous.
@@ -83,7 +95,11 @@ Rules:
 6. Spotify: "play X" → search_spotify+play_spotify. Controls → control_playback. Not connected → call open_url('http://localhost:8000/api/v1/auth/spotify') immediately.
 7. Google not connected → visit http://localhost:8000/api/v1/auth/google.
 8. Maps: place/restaurant/"where is X"/"show on map"/"open maps"/"navigate" → search_maps. "how far"/"distance"/"how long to get to" → get_directions(origin="<use coords above if user says my place/here>", destination="...") — this returns distance+time as text, do NOT also open maps.
-9. "call [name]" → IMMEDIATELY call call_contact(name="[name]"). "text/message [name]" → IMMEDIATELY call message_contact(name="[name]"). A name alone is enough — never ask for more details.\
+9. "call [name]" → IMMEDIATELY call call_contact(name="[name]"). "text/message [name]" → IMMEDIATELY call message_contact(name="[name]"). A name alone is enough — never ask for more details.
+10. System: "open X" / "launch X" → open_app(X). "close/kill X" → close_app(X). "what's running" → list_running_apps. "open my documents/downloads/desktop" → open_file_or_folder. "find file X" / "most recent X" → find_files(X) — results are always sorted newest first. "volume X%" → set_volume(X). "system info" → get_system_info. "lock" → lock_screen. "screenshot" → take_screenshot. "download X from URL" → download_file(url, filename).
+11. Context: "it", "that", "this", "the last one", "the first one" always refer to the most recent item mentioned in the conversation. Never ask the user to clarify what they mean by these pronouns — infer from context.
+12. Location: "where am I" / "what city" / "my location" → reverse_geocode(coords from above). Never answer a location question with weather.
+13. Calls: "answer" / "pick up" / "answer it" → answer_call(). "decline" / "reject" / "ignore the call" → decline_call(). If there is an incoming call notification, ask "Incoming call from [caller] — answer or decline?" and wait for their response.\
 """
 
 
@@ -92,6 +108,7 @@ async def agent_node(state: EDITHState, config: RunnableConfig) -> dict:
     location = config.get("configurable", {}).get("location", "")
     location_ctx = (
         f"User location coords: {location}\n"
+        f"- 'where am I' / 'what city' / 'my location' → reverse_geocode('{location}')\n"
         f"- Weather with no city → get_weather('{location}')\n"
         f"- 'from my place' / 'from here' / 'near me' → use '{location}' as the origin or query\n\n"
         if location else ""
