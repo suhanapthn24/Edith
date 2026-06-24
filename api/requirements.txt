@@ -1,36 +1,32 @@
-# ── Core ──────────────────────────────────────────────────────
+# Core
 fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
 pydantic-settings
 
-# ── Database ──────────────────────────────────────────────────
+# Database
 sqlalchemy[asyncio]
-asyncpg
-alembic
-pgvector
+aiosqlite
 
-# ── AI ────────────────────────────────────────────────────────
-anthropic
+# AI
 langchain
-langchain-anthropic
-langchain-community
+langchain-core
+langchain-openai
+langchain-ollama
+langchain-chroma
 langgraph
-ollama
 
-# ── Utilities ─────────────────────────────────────────────────
+# Vector DB
+chromadb
+
+# Google APIs
+google-auth
+google-auth-oauthlib
+google-api-python-client
+
+# Utilities
 httpx
 python-multipart
-PyPDF2
 aiofiles
-
-# ── Background tasks ──────────────────────────────────────────
-apscheduler
-
-# ── Storage ───────────────────────────────────────────────────
-supabase
-
-# ── Auth ──────────────────────────────────────────────────────
-PyJWT
-cryptography
+PyPDF2

@@ -1,4 +1,4 @@
-# APEX — Agent Architecture (Ollama-first)
+# EDITH — Agent Architecture (Ollama-first)
 ### v1.1 · June 2026
 
 ## Philosophy: Local-first, Cloud-when-needed
@@ -63,7 +63,7 @@ class AgentState(TypedDict):
 
 ```python
 ORCHESTRATOR_SYSTEM = """
-You are APEX, a personal AI chief of staff. Your job is to:
+You are EDITH, a personal AI chief of staff. Your job is to:
 1. Understand what the user is asking
 2. Identify which specialist agents are needed
 3. Coordinate their responses into a unified answer
@@ -202,7 +202,7 @@ Always cite which note/article the information came from.
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres import PostgresSaver
 
-def build_apex_graph(checkpointer):
+def build_EDITH_graph(checkpointer):
     graph = StateGraph(AgentState)
 
     # Add agent nodes
@@ -280,11 +280,11 @@ Once Ollama is running and you have accumulated data:
    - DSA explanations that match your understanding level
    - Briefings in your preferred format
 3. **Use Unsloth** (free, fast fine-tuning on consumer GPU) for LoRA fine-tuning
-4. **Load custom model** back into Ollama as `apex-tuned:latest`
+4. **Load custom model** back into Ollama as `EDITH-tuned:latest`
 
 ```bash
 # Ollama Modelfile for personalized model
 FROM llama3.1:8b
-SYSTEM """You are APEX, personalized AI for [your name]. 
+SYSTEM """You are EDITH, personalized AI for [your name]. 
 [Personalization details here after fine-tuning]"""
 ```

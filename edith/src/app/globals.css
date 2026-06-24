@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── edith Color Palette v3 ──────────────────────── */
+  --color-edith-dark:     #1E1118;   /* Deep Plum (bg)       */
+  --color-edith-midnight: #150D11;   /* Dark Plum (cards)    */
+  --color-edith-moss:     #AABAAE;   /* Brook Green          */
+  --color-edith-beige:    #E3D6BF;   /* Chalk                */
+  --color-edith-rosy:     #933B5B;   /* Amaranth             */
+  --color-edith-thulian:  #B5728A;   /* Thulian Pink         */
+  --color-edith-olive:    #9F9679;   /* Pomelo Olive         */
+
+  /* ── Semantic tokens ────────────────────────────── */
+  --color-bg:            #1E1118;
+  --color-surface:       #1A1016;
+  --color-card:          rgba(21, 13, 17, 0.65);
+  --color-border:        rgba(170, 186, 174, 0.18);
+  --color-text:          #E3D6BF;
+  --color-text-muted:    rgba(227, 214, 191, 0.55);
+  --color-accent:        #AABAAE;
+  --color-cta:           #933B5B;
+  --color-teal:          #150D11;
+
+  /* ── Fonts ──────────────────────────────────────── */
+  --font-display: var(--font-cormorant), 'Georgia', serif;
+  --font-heading: var(--font-playfair), 'Georgia', serif;
+  --font-sans:    var(--font-dm-sans), 'system-ui', sans-serif;
+  --font-mono:    var(--font-jetbrains), 'Courier New', monospace;
+}
+
+/* ── Base Styles ──────────────────────────────────── */
+:root {
+  background-color: #1E1118;
+  color: #E3D6BF;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ── Scrollbar ────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #1E1118;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(170, 186, 174, 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(170, 186, 174, 0.5);
+}
+
+/* ── Glass card utility ───────────────────────────── */
+.glass-card {
+  background: rgba(21, 13, 17, 0.6);
+  border: 1px solid rgba(170, 186, 174, 0.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Gradient text utility ────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #E3D6BF 0%, #933B5B 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Progress bar fill animation ─────────────────── */
+@keyframes progress-fill {
+  from { width: 0%; }
+  to   { width: var(--progress); }
+}
+
+.progress-bar {
+  animation: progress-fill 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* ── Streak pulse ─────────────────────────────────── */
+@keyframes streak-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+
+.streak-active {
+  animation: streak-pulse 2s ease-in-out infinite;
+}
+
+/* ── Fade-in ──────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}

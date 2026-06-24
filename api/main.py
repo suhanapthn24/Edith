@@ -4,12 +4,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from database import engine, Base
-from routers import dsa, research, language
+from routers.chat import router as chat_router # type: ignore
+from routers.google_auth import router as google_auth_router # type: ignore
+from routers.spotify_auth import router as spotify_auth_router
+
+# Import models so SQLAlchemy registers them before create_all
+import models  # noqa: F401
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create all tables on startup (use Alembic in production)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -17,9 +21,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="APEX API",
-    description="AI Personal Operating System — Backend",
-    version="0.1.0",
+    title="EDITH",
+    description="Personal AI Operating System",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -31,12 +35,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routers ───────────────────────────────────────────────────────────────────
-app.include_router(dsa.router)
-app.include_router(research.router)
-app.include_router(language.router)
+app.include_router(chat_router)
+app.include_router(google_auth_router)
+app.include_router(spotify_auth_router)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "apex-api"}
+    return {"status": "ok", "model": settings.OLLAMA_MODEL}

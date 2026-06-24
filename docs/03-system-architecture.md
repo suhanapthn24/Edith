@@ -1,11 +1,11 @@
-# APEX — System Architecture
+# EDITH — System Architecture
 ### v1.1 · June 2026
 
 ## High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        APEX PLATFORM                            │
+│                        EDITH PLATFORM                            │
 │                                                                 │
 │  ┌────────────────────────────────────────────────────────┐    │
 │  │                   NEXT.JS FRONTEND                      │    │

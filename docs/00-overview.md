@@ -1,7 +1,7 @@
-# APEX — AI Personal Operating System
+# EDITH — AI Personal Operating System
 ### Design Document Index · v1.1 · June 2026
 
-## What is APEX?
+## What is EDITH?
 A personal AI operating system that acts as a chief of staff — aware of goals, schedule, learning progress, and projects. Continuously answers: *"What should I do right now?"*
 
 ## Module List (v1.1)

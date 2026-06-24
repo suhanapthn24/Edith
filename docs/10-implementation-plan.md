@@ -1,4 +1,4 @@
-# APEX — Implementation Plan
+# EDITH — Implementation Plan
 ### v1.1 · June 2026
 
 ## Current State (as of June 19, 2026)
@@ -38,8 +38,8 @@
 - Run once: `python scripts/seed_neetcode.py`
 
 #### Step 4: Connect frontend to backend (DSA module)
-- Create `apex/src/app/(dashboard)/dsa/page.tsx`
-- Create `apex/src/lib/api.ts` (axios/fetch wrapper pointing to localhost:8000)
+- Create `EDITH/src/app/(dashboard)/dsa/page.tsx`
+- Create `EDITH/src/lib/api.ts` (axios/fetch wrapper pointing to localhost:8000)
 - Replace mock data in NeetcodeProgress widget with real API call
 
 #### Step 5: Language module
@@ -57,7 +57,7 @@
 
 ### Frontend
 ```bash
-cd apex
+cd EDITH
 npm run dev          # http://localhost:3000
 ```
 

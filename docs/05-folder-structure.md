@@ -1,8 +1,8 @@
-# APEX — Folder Structure
+# EDITH — Folder Structure
 ### v1.1 · June 2026
 
 ```
-apex/
+EDITH/
 ├── apps/
 │   ├── web/                          # Next.js 14 frontend
 │   │   ├── app/

@@ -1,4 +1,4 @@
-# APEX — MVP Roadmap (Phase 1)
+# EDITH — MVP Roadmap (Phase 1)
 ### Weeks 1–8 · Goal: Working personal dashboard with AI
 
 ## Week 1–2: Foundation

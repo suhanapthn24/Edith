@@ -3,12 +3,12 @@ version: "3.9"
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: apex-postgres
+    container_name: EDITH-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "0000"
-      POSTGRES_DB: apex
+      POSTGRES_DB: EDITH
     ports:
       - "5432:5432"
     volumes:

@@ -1,8 +1,8 @@
-# APEX — Product Requirements Document
+# EDITH — Product Requirements Document
 ### v1.1 · June 2026
 
 ## Vision
-APEX is a personal AI operating system that functions as a chief of staff — aware of your goals, schedule, learning progress, and projects, and capable of reasoning across all of them to continuously answer: *"What should I do right now?"*
+EDITH is a personal AI operating system that functions as a chief of staff — aware of your goals, schedule, learning progress, and projects, and capable of reasoning across all of them to continuously answer: *"What should I do right now?"*
 
 ## Design Principles
 | Principle | Meaning |

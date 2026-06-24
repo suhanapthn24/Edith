@@ -1,4 +1,4 @@
-# APEX — Tech Stack Decisions
+# EDITH — Tech Stack Decisions
 ### v1.1 · June 2026
 
 ## UI Design System
