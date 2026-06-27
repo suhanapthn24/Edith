@@ -1,88 +1,125 @@
 # EDITH — Personal AI Operating System
 
-A voice-first personal AI assistant. Talk to it like a chief of staff — it handles your calendar, email, music, tasks, reminders, maps, weather, and more through natural conversation and voice commands.
+A voice-first personal AI assistant. Talk to it like a chief of staff — it handles your calendar, email, music, tasks, reminders, maps, weather, system control, and more through natural conversation and voice commands.
 
 ## Features
 
-- **Voice activation** — Wake words: "Edith", "hey", "listen", "wake up", "wakey wakey"
-- **Tasks & Reminders** — create, list, complete, and update (local SQLite)
-- **Google Calendar** — list, create, and delete events via OAuth
-- **Gmail** — list, read, and send emails via OAuth
-- **Spotify** — search, play, queue, skip, pause, resume via OAuth
-- **Maps & Directions** — distance + travel time via Google Maps API; opens maps on demand
-- **Weather** — current conditions and multi-day forecast
-- **Knowledge Base** — RAG over personal notes (ChromaDB)
-- **Google Contacts** — call and message contacts (opens dialer/SMS)
-- **Web & YouTube** — search and open results in browser
+### Voice pipeline
+- **Always-on wake word** — "Edith", "hey Edith", "ok Edith" — continuous browser STT, no button needed
+- **Speech interruption** — say "stop", "wait", or "Edith" mid-sentence to interrupt EDITH while she's speaking
+- **Local offline STT** — optional Whisper endpoint (`/api/v1/stt`) replaces browser STT; auto-detected at startup
+- **Multi-language** — cycle EN / HI / ES / FR / DE / JA from the hologram UI; applies to both STT and TTS
+- **Global hotkey** — `Ctrl+Shift+E` from any app wakes EDITH; `Ctrl+Shift+S` stops speech
+- **Persistent session** — conversation context survives page refreshes
+
+### Holographic display (`hologram.html`)
+- Live panels: weather, calendar, Spotify, Gmail, system stats, tasks, news, crypto
+- Draggable panels with localStorage position persistence; double-click label to reset
+- Pomodoro overlay bar showing cycle, state and countdown
+- Toast alerts with optional TTS for proactive events
+- MediaPipe gesture controls (swipe, pinch, palm)
+- Hologram pyramid flip toggle
+
+### Proactive intelligence (runs every 60 s in background)
+- **Morning briefing** — auto-fires 7–10 am on first daily load
+- **Calendar reminders** — speaks "X starts in 5 minutes" proactively
+- **Email arrival** — alerts when unread count rises (suppressed during focus mode)
+- **Overdue tasks** — alerts once per task when due date passes
+- **Battery warnings** — low (≤20%) and critical (≤5%) alerts
+- **CPU / RAM spikes** — alerts after 3 consecutive ticks above threshold
+- **Phone notifications** — mirrors Android notification titles via ADB
+- **End-of-day summary** — prompts "say daily summary" at 6–8 pm
+
+### Productivity
+- **Focus mode** — starts Pomodoro, suppresses email/notification alerts for the session
+- **Pomodoro timer** — hologram overlay, WebSocket state updates, session recording
+- **Pomodoro stats** — `get_pomodoro_stats(days=7)` — focus time, cycles, daily average
+- **Daily briefing** — morning snapshot: battery, CPU/RAM, prompts for calendar/email/weather
+- **Daily summary** — end-of-day: focus time from today's sessions, prompts for tasks/email
+- **Clipboard history** — 20-item auto-captured rolling history
+- **Text snippets** — save + expand reusable text blocks
+- **Window layouts** — save and restore multi-window arrangements
+
+### System control
+- Open/close apps, files, folders
+- Volume, brightness, power, lock, screenshot
+- Window management: focus, resize, move, mouse/keyboard automation
+- Screen recording (MP4 to Desktop)
+- WiFi management, printing
+- Battery, mic, process management
+- AI vision / OCR (describe screen, extract text, find elements)
+- Shell / `run_command`
+
+### Integrations
+- **Tasks & Reminders** — local SQLite CRUD
+- **Google Calendar, Gmail, Contacts** — OAuth 2.0
+- **Spotify** — search, play, queue, control
+- **Weather** — current + forecast (OpenWeatherMap)
+- **Maps & Directions** — Google Maps API
+- **Web, YouTube, Maps** — open in browser
+- **ADB (Android)** — screenshot, tap, type, SMS, notifications, file push/pull
+- **Smart home** — Home Assistant REST API (`HA_URL` + `HA_TOKEN` in `.env`)
+- **VS Code context** — push file/error context from terminal → EDITH chat session
+- **Dev tools** — Docker, Git, HTTP, open ports, ping
+- **Knowledge base** — RAG over personal notes (ChromaDB, `add_note` / `search_knowledge`)
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
 | Frontend | Next.js 15, TypeScript, Tailwind CSS |
-| Backend | FastAPI, LangGraph, Python 3.12 |
+| Hologram display | Vanilla HTML/JS/CSS (`hologram.html`) |
+| Backend | FastAPI, LangGraph ReAct, Python 3.12 |
 | LLM | `google/gemini-2.5-flash` via OpenRouter |
-| Database | SQLite (tasks, reminders, knowledge base) |
-| Voice | Web Speech API (browser-native) |
-| Auth | Google OAuth 2.0, Spotify OAuth 2.0 |
+| Database | PostgreSQL (main) + SQLite (tasks/reminders/knowledge) |
+| Voice | Web Speech API + optional Whisper (local) |
+| Auth | Google OAuth 2.0, Spotify OAuth 2.0, Clerk |
 
 ## Project Structure
 
 ```
 .
-├── api/                        # FastAPI backend
-│   ├── agent/                  # APEX — main ReAct agent
-│   │   ├── apex.py             # LangGraph ReAct graph + system prompt
-│   │   └── tools/              # 80+ tool implementations
-│   │       ├── tasks.py / reminders.py          # Local SQLite
-│   │       ├── google_calendar.py / gmail.py    # Google APIs
-│   │       ├── spotify.py                       # Spotify playback
-│   │       ├── browser.py                       # Web / YouTube / Maps
-│   │       ├── weather.py / google_contacts.py
-│   │       ├── rag.py                           # ChromaDB knowledge base
-│   │       ├── system_nav.py                    # Apps, files, volume, power
-│   │       ├── window_manager.py                # Windows, mouse, keyboard
-│   │       ├── advanced_control.py              # Screen recording, WiFi, print
-│   │       ├── ai_vision.py                     # Screen analysis, OCR
-│   │       ├── system_extras.py                 # Battery, mic, processes
-│   │       ├── productivity.py                  # Pomodoro, snippets, layouts
-│   │       ├── dev_tools.py                     # Docker, Git, HTTP, ports
-│   │       ├── adb_control.py                   # Android phone control
-│   │       └── calls.py                         # Answer / decline calls
-│   ├── agents/                 # Dashboard agents (DB-aware, Ollama)
-│   │   ├── apex_agent.py       # Dashboard-scoped agent
-│   │   └── tools/              # DSA, language, research DB tools
+├── api/
+│   ├── agent/
+│   │   ├── apex.py                  # LangGraph ReAct agent + SYSTEM prompt
+│   │   └── tools/
+│   │       ├── tasks.py             # SQLite tasks
+│   │       ├── reminders.py         # SQLite reminders
+│   │       ├── google_calendar.py   # Google Calendar
+│   │       ├── gmail.py             # Gmail
+│   │       ├── spotify.py           # Spotify playback
+│   │       ├── browser.py           # Web / YouTube / Maps
+│   │       ├── weather.py
+│   │       ├── google_contacts.py
+│   │       ├── rag.py               # ChromaDB knowledge base
+│   │       ├── system_nav.py        # Apps, files, volume, power
+│   │       ├── window_manager.py    # Windows, mouse, keyboard
+│   │       ├── advanced_control.py  # Screen recording, WiFi, print
+│   │       ├── ai_vision.py         # Screen analysis, OCR
+│   │       ├── system_extras.py     # Battery, mic, processes
+│   │       ├── productivity.py      # Pomodoro, focus mode, snippets, layouts, stats
+│   │       ├── dev_tools.py         # Docker, Git, HTTP, ports
+│   │       ├── adb_control.py       # Android phone (ADB)
+│   │       ├── smart_home.py        # Home Assistant REST API
+│   │       └── calls.py
 │   ├── routers/
-│   │   ├── chat.py             # SSE streaming chat endpoint
-│   │   ├── calls.py            # Incoming call notifications
-│   │   ├── hologram.py         # Hologram WebSocket
-│   │   ├── google_auth.py      # Google OAuth flow
-│   │   ├── spotify_auth.py     # Spotify OAuth flow
-│   │   ├── dsa.py / language.py / research.py  # Module CRUD
-│   ├── models/                 # SQLAlchemy ORM (SQLite)
-│   ├── schemas/                # Pydantic schemas
+│   │   ├── chat.py                  # SSE streaming chat
+│   │   ├── hologram.py              # WebSocket data feed + proactive triggers
+│   │   ├── stt.py                   # Local Whisper STT endpoint
+│   │   ├── vscode.py                # VS Code context push
+│   │   ├── google_auth.py
+│   │   ├── spotify_auth.py
+│   │   └── calls.py
 │   ├── services/
-│   │   ├── call_monitor.py     # Background call-monitoring thread
-│   │   └── sm2.py              # Spaced-repetition (SM-2) algorithm
-│   ├── integrations/           # External API clients
-│   ├── config.py               # Settings (pydantic-settings)
-│   ├── database.py             # SQLAlchemy SQLite engine
+│   │   ├── proactive.py             # Background scheduler (alerts, reminders, health)
+│   │   ├── hotkey_daemon.py         # Global Ctrl+Shift+E / Ctrl+Shift+S hotkeys
+│   │   ├── call_monitor.py
+│   │   └── sm2.py
+│   ├── config.py
+│   ├── database.py
 │   └── main.py
-├── edith/                      # Next.js 15 frontend
-│   └── src/
-│       ├── app/
-│       │   ├── (dashboard)/    # Route group with shared layout
-│       │   │   ├── dashboard / calendar / dsa / language /
-│       │   │   ├── research / knowledge / career / skills
-│       │   │   └── layout.tsx  # Sidebar + topbar shell
-│       │   └── layout.tsx / globals.css
-│       ├── components/
-│       │   ├── chat/ChatWindow.tsx   # Voice, SSE streaming, UI
-│       │   ├── dashboard/            # Briefing, streaks, progress widgets
-│       │   └── layout/               # Navbar, sidebar
-│       └── lib/
-├── hologram.html               # Standalone hologram page
-├── knowledge_base/             # Source files for RAG
+├── hologram.html                    # Standalone holographic display
+├── edith/                           # Next.js 15 frontend dashboard
 └── docker-compose.yml
 ```
 
@@ -92,7 +129,7 @@ A voice-first personal AI assistant. Talk to it like a chief of staff — it han
 
 - Python 3.12+
 - Node.js 18+
-- An [OpenRouter](https://openrouter.ai) account (free tier works)
+- [OpenRouter](https://openrouter.ai) account (free tier works)
 
 ### 1. Backend
 
@@ -102,7 +139,7 @@ python -m venv .venv && .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and fill in your keys:
+Copy `.env.example` to `.env` and fill in keys:
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -114,12 +151,19 @@ GOOGLE_CLIENT_SECRET=...
 SPOTIFY_CLIENT_ID=...
 SPOTIFY_CLIENT_SECRET=...
 
-WEATHER_API_KEY=...         # openweathermap.org
-GOOGLE_MAPS_API_KEY=...     # Google Cloud Console
-YOUTUBE_API_KEY=...         # Google Cloud Console
-```
+WEATHER_API_KEY=...           # openweathermap.org
+WEATHER_CITY=Pune,IN          # default city for hologram weather panel
 
-Start the server:
+GOOGLE_MAPS_API_KEY=...
+YOUTUBE_API_KEY=...
+
+# Optional — smart home
+HA_URL=http://homeassistant.local:8123
+HA_TOKEN=<long-lived access token from HA profile>
+
+# Optional — local STT model (base/small/medium)
+WHISPER_MODEL=base
+```
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
@@ -130,36 +174,63 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ```bash
 cd edith
 npm install
-```
-
-Create `edith/.env.local`:
-
-```env
-NEXT_PUBLIC_MODEL_LABEL=gemini-2.5-flash
-```
-
-```bash
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### 3. Hologram display
+
+Open `hologram.html` directly in Chrome (or any Chromium browser). It connects to `ws://localhost:8000/ws/hologram` automatically.
+
+## Optional pip packages
+
+| Package | Enables |
+|---------|---------|
+| `openai-whisper` | Local offline STT (`/api/v1/stt`) |
+| `keyboard` | Global hotkeys (Ctrl+Shift+E / Ctrl+Shift+S) |
+| `pygetwindow` | Window management, layout saves |
+| `pyautogui` | Mouse/keyboard automation |
+| `pyperclip` | Clipboard history |
+| `mss` | Fast screenshots |
+| `opencv-python` | Vision tools |
+| `pytesseract` | OCR (also needs Tesseract binary) |
+| `pycaw` | Audio device control |
+| `faster-whisper` | Alternative faster STT backend |
+
+Install all at once:
+```bash
+pip install openai-whisper keyboard pygetwindow pyautogui pyperclip mss opencv-python pycaw
+```
+
 ## Connecting Integrations
 
 ### Google (Calendar, Gmail, Contacts)
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → create a project
-2. Enable: **Gmail API**, **Google Calendar API**, **People API**
-3. Create OAuth 2.0 credentials (Web application)
-4. Add redirect URI: `http://localhost:8000/api/v1/auth/google/callback`
-5. Visit `http://localhost:8000/api/v1/auth/google` — sign in once
+1. [Google Cloud Console](https://console.cloud.google.com) → enable Gmail, Calendar, People APIs
+2. Create OAuth 2.0 credentials; add redirect URI `http://localhost:8000/api/v1/auth/google/callback`
+3. Visit `http://localhost:8000/api/v1/auth/google` and sign in once
 
 ### Spotify
+1. [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) → add redirect URI `http://127.0.0.1:8000/api/v1/auth/spotify/callback`
+2. Visit `http://localhost:8000/api/v1/auth/spotify` and sign in once
 
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) → create an app
-2. Add redirect URI: `http://127.0.0.1:8000/api/v1/auth/spotify/callback`
-3. Visit `http://localhost:8000/api/v1/auth/spotify` — sign in once
-4. Make sure Spotify is open on a device before playing music
+### Android phone (ADB)
+1. `winget install Google.PlatformTools`
+2. Enable USB Debugging on phone → connect via USB or WiFi (`adb connect <phone-ip>:5555`)
+
+### Home Assistant
+1. Add `HA_URL` and `HA_TOKEN` to `api/.env`
+2. Get token: Home Assistant → Profile → Long-Lived Access Tokens
+
+### VS Code context push
+Bind this to a VS Code task or terminal command to inject code context into EDITH's session:
+```bash
+# Push selected code/error to EDITH
+curl -s -X POST http://localhost:8000/api/v1/vscode/context \
+  -H "Content-Type: application/json" \
+  -d '{"content": "<your code/error>", "file_path": "src/main.py", "message": "explain this error"}'
+# Then say "EDITH explain this" in the hologram
+```
 
 ## API Endpoints
 
@@ -167,9 +238,12 @@ Open [http://localhost:3000](http://localhost:3000).
 |--------|------|-------------|
 | `POST` | `/api/v1/chat/stream` | SSE streaming chat |
 | `POST` | `/api/v1/chat/clear` | Clear session history |
-| `GET` | `/api/v1/auth/google` | Start Google OAuth |
-| `GET` | `/api/v1/auth/spotify` | Start Spotify OAuth |
-| `GET` | `/health` | Health check |
+| `POST` | `/api/v1/stt/` | Transcribe audio (Whisper) |
+| `GET`  | `/api/v1/stt/health` | Check if local STT is available |
+| `POST` | `/api/v1/vscode/context` | Push code/error context into session |
+| `GET`  | `/api/v1/auth/google` | Start Google OAuth |
+| `GET`  | `/api/v1/auth/spotify` | Start Spotify OAuth |
+| `GET`  | `/health` | Health check |
 
 ## Environment Variables
 
@@ -179,8 +253,12 @@ Open [http://localhost:3000](http://localhost:3000).
 | `OPENROUTER_MODEL` | Yes | Model ID (e.g. `google/gemini-2.5-flash`) |
 | `GOOGLE_CLIENT_ID` | For Google features | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | For Google features | Google OAuth client secret |
-| `SPOTIFY_CLIENT_ID` | For Spotify | Spotify app client ID |
-| `SPOTIFY_CLIENT_SECRET` | For Spotify | Spotify app client secret |
+| `SPOTIFY_CLIENT_ID` | For Spotify | Spotify OAuth client ID |
+| `SPOTIFY_CLIENT_SECRET` | For Spotify | Spotify OAuth client secret |
 | `WEATHER_API_KEY` | For weather | OpenWeatherMap API key |
-| `GOOGLE_MAPS_API_KEY` | For maps/directions | Google Maps API key |
-| `YOUTUBE_API_KEY` | For YouTube search | YouTube Data API v3 key |
+| `WEATHER_CITY` | No | Default city (`City,CC` format, default `Pune,IN`) |
+| `GOOGLE_MAPS_API_KEY` | For maps | Google Maps API key |
+| `YOUTUBE_API_KEY` | For YouTube | YouTube Data API v3 key |
+| `HA_URL` | For smart home | Home Assistant base URL |
+| `HA_TOKEN` | For smart home | Home Assistant long-lived access token |
+| `WHISPER_MODEL` | No | Whisper model size (`base`/`small`/`medium`, default `base`) |

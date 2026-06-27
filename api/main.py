@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,10 +10,15 @@ from routers.google_auth import router as google_auth_router
 from routers.spotify_auth import router as spotify_auth_router
 from routers.calls import router as calls_router
 from routers.hologram import router as hologram_router, hologram_ws
+from routers.stt import router as stt_router
+from routers.vscode import router as vscode_router
 
 # Import models so SQLAlchemy registers them before create_all
 import models  # noqa: F401
 import services.call_monitor as call_monitor
+import services.proactive as proactive
+import services.hotkey_daemon as hotkey_daemon
+from agent.tools import productivity as _prod_tools
 
 
 @asynccontextmanager
@@ -20,6 +26,10 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     call_monitor.start()
+    loop = asyncio.get_running_loop()
+    _prod_tools.set_event_loop(loop)
+    hotkey_daemon.start(loop)
+    asyncio.create_task(proactive.run())
     yield
     await engine.dispose()
 
@@ -44,6 +54,8 @@ app.include_router(google_auth_router)
 app.include_router(spotify_auth_router)
 app.include_router(calls_router)
 app.include_router(hologram_router)
+app.include_router(stt_router)
+app.include_router(vscode_router)
 app.websocket("/ws/hologram")(hologram_ws)
 
 

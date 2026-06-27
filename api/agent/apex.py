@@ -50,9 +50,14 @@ from agent.tools.system_extras import (
 from agent.tools.productivity import (
     get_clipboard_history, paste_from_history,
     add_snippet, expand_snippet, list_snippets,
-    start_pomodoro, stop_pomodoro,
+    start_pomodoro, stop_pomodoro, get_pomodoro_stats,
+    focus_mode, exit_focus_mode,
     save_window_layout, restore_window_layout, list_window_layouts,
-    daily_briefing,
+    daily_briefing, daily_summary,
+)
+from agent.tools.smart_home import (
+    get_home_devices, get_home_state, control_device,
+    set_light_brightness, set_thermostat, run_home_automation,
 )
 from agent.tools.dev_tools import (
     docker_list, docker_start, docker_stop, docker_restart, docker_logs,
@@ -127,9 +132,13 @@ TOOLS = [
     # Productivity
     get_clipboard_history, paste_from_history,
     add_snippet, expand_snippet, list_snippets,
-    start_pomodoro, stop_pomodoro,
+    start_pomodoro, stop_pomodoro, get_pomodoro_stats,
+    focus_mode, exit_focus_mode,
     save_window_layout, restore_window_layout, list_window_layouts,
-    daily_briefing,
+    daily_briefing, daily_summary,
+    # Smart home (Home Assistant)
+    get_home_devices, get_home_state, control_device,
+    set_light_brightness, set_thermostat, run_home_automation,
     # Dev tools
     docker_list, docker_start, docker_stop, docker_restart, docker_logs,
     docker_images, docker_compose,
@@ -196,7 +205,11 @@ Rules:
 22. Battery/Mic: "battery level" → get_battery_status(). "mute/unmute mic" → mute_microphone()/unmute_microphone(). "mic status" → get_microphone_status(). "power plan X" → set_power_plan(plan). "kill process X" → kill_process(X). "top processes" → list_top_processes(). "volume level" → get_volume().
 23. Productivity: "clipboard history" → get_clipboard_history(). "paste #N from history" → paste_from_history(N). "add snippet X = Y" → add_snippet(X,Y). "type my X / expand X" → expand_snippet(X). "start pomodoro" → start_pomodoro(). "stop pomodoro" → stop_pomodoro(). "save layout X" → save_window_layout(X). "restore layout X" → restore_window_layout(X). "morning briefing" → daily_briefing().
 24. Dev: "docker ps/start/stop/logs X" → docker_* tools. "open ports" → list_open_ports(). "check port N" → check_port(N). "ping X" → ping_host(X). "git status/log/diff/pull/commit" → git_* tools. "GET/POST URL" → http_get/http_post. "env info" → get_env_info().
-25. Android/ADB: "phone screenshot" → adb_screenshot(). "tap phone at X,Y" → adb_tap(X,Y). "type on phone X" → adb_type(X). "open app X on phone" → adb_open_app(package). "list phone apps" → adb_list_apps(). "send SMS to X: Y" → adb_send_sms(number,msg). "phone info" → adb_phone_info(). "push/pull file" → adb_push_file/adb_pull_file. "connect phone" → adb_connect(ip:port).\
+25. Android/ADB: "phone screenshot" → adb_screenshot(). "tap phone at X,Y" → adb_tap(X,Y). "type on phone X" → adb_type(X). "open app X on phone" → adb_open_app(package). "list phone apps" → adb_list_apps(). "send SMS to X: Y" → adb_send_sms(number,msg). "phone info" → adb_phone_info(). "push/pull file" → adb_push_file/adb_pull_file. "connect phone" → adb_connect(ip:port).
+26. Focus mode: "focus mode" / "start focus" / "do not disturb" → focus_mode(). "exit focus" / "end focus" / "stop focus" → exit_focus_mode(). Focus mode starts Pomodoro AND suppresses email alerts automatically.
+27. Pomodoro stats: "how much did I focus" / "pomodoro history" / "focus stats" → get_pomodoro_stats(). Add days=N to change look-back window.
+28. Daily summary: "end of day" / "what did I do today" / "daily summary" → daily_summary(). This gives focus time + prompts to retrieve task/email data.
+29. Smart home: "turn on/off/toggle [device]" → control_device(entity_id, action). "list home devices" → get_home_devices(). "set thermostat to X" → set_thermostat(entity_id, X). "set light to X%" → set_light_brightness(entity_id, X). "run automation X" → run_home_automation(automation_id). "status of [device]" → get_home_state(entity_id). Requires HA_URL + HA_TOKEN in .env.\
 """
 
 

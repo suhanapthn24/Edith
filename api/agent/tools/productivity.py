@@ -3,6 +3,7 @@ Productivity tools: clipboard history, Pomodoro timer, window layout presets,
 text snippets, daily briefing.
 """
 
+import asyncio
 import json
 import subprocess
 import threading
@@ -13,6 +14,20 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import tool
+
+# ── Event loop reference (set by main.py on startup) ─────────────────────────
+_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
+    global _event_loop
+    _event_loop = loop
+
+
+def _push(coro) -> None:
+    """Schedule a coroutine on the main event loop from any thread."""
+    if _event_loop and not _event_loop.is_closed():
+        asyncio.run_coroutine_threadsafe(coro, _event_loop)
 
 # ── Clipboard History ─────────────────────────────────────────────────────────
 
@@ -137,40 +152,124 @@ _pomo_thread: threading.Thread | None = None
 _pomo_active = False
 
 
-def _pomodoro_run(work_min: int, break_min: int, cycles: int):
-    global _pomo_active
-    try:
-        import subprocess as sp
-        def toast(title, msg):
-            ps = f"""
+async def _pomo_broadcast(active: bool, cycle: int, total: int, state: str, remaining_sec: int) -> None:
+    from routers.hologram import manager  # type: ignore
+    await manager.broadcast({
+        "type": "pomodoro",
+        "active": active,
+        "cycle": cycle,
+        "total": total,
+        "state": state,
+        "remaining_sec": remaining_sec,
+    })
+
+
+async def _pomo_alert(title: str, msg: str) -> None:
+    from routers.hologram import trigger_alert  # type: ignore
+    await trigger_alert(title, msg)
+
+
+def _toast(title: str, msg: str) -> None:
+    ps = f"""
 Add-Type -AssemblyName System.Windows.Forms
 $n=New-Object System.Windows.Forms.NotifyIcon
 $n.Icon=[System.Drawing.SystemIcons]::Information
 $n.BalloonTipTitle='{title}'; $n.BalloonTipText='{msg}'; $n.Visible=$True
 $n.ShowBalloonTip(8000); Start-Sleep 9; $n.Dispose()
 """
-            sp.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
+    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
 
+
+def _pomodoro_run(work_min: int, break_min: int, cycles: int):
+    global _pomo_active, _focus_mode_active
+    cycles_done = 0
+    try:
         for cycle in range(1, cycles + 1):
             if not _pomo_active:
                 break
-            toast(f"🍅 Pomodoro #{cycle}", f"Focus for {work_min} minutes. Go!")
-            time.sleep(work_min * 60)
+
+            # ── Work phase ──
+            _toast(f"Pomodoro #{cycle}", f"Focus for {work_min} minutes. Go!")
+            _push(_pomo_alert(f"POMODORO #{cycle}", f"Focus {work_min} min — go!"))
+            _push(_pomo_broadcast(True, cycle, cycles, "FOCUS", work_min * 60))
+
+            remaining = work_min * 60
+            while remaining > 0 and _pomo_active:
+                sleep_t = min(30, remaining)
+                time.sleep(sleep_t)
+                remaining -= sleep_t
+                if _pomo_active:
+                    _push(_pomo_broadcast(True, cycle, cycles, "FOCUS", remaining))
+
             if not _pomo_active:
                 break
-            if cycle < cycles:
-                toast("⏸ Break time!", f"Take a {break_min}-minute break.")
-                time.sleep(break_min * 60)
+            cycles_done += 1
 
-        if _pomo_active:
-            toast("✅ Pomodoro done!", f"Completed {cycles} cycles. Great work!")
+            # ── Break phase ──
+            if cycle < cycles:
+                _toast("Break time!", f"Take a {break_min}-minute break.")
+                _push(_pomo_alert("BREAK TIME", f"{break_min} min break — relax!"))
+                _push(_pomo_broadcast(True, cycle, cycles, "BREAK", break_min * 60))
+
+                remaining = break_min * 60
+                while remaining > 0 and _pomo_active:
+                    sleep_t = min(30, remaining)
+                    time.sleep(sleep_t)
+                    remaining -= sleep_t
+                    if _pomo_active:
+                        _push(_pomo_broadcast(True, cycle, cycles, "BREAK", remaining))
+
+        if _pomo_active and cycles_done == cycles:
+            _toast("Pomodoro done!", f"Completed {cycles} cycles. Great work!")
+            _push(_pomo_alert("POMODORO DONE", f"Completed {cycles} cycles — great work!"))
     finally:
         _pomo_active = False
+        _focus_mode_active = False
+        _push(_pomo_broadcast(False, 0, cycles, "DONE", 0))
+        _record_pomo_session(work_min, cycles_done)
+
+
+_focus_mode_active: bool = False
+
+# ── Pomodoro stats ─────────────────────────────────────────────────────────────
+
+_POMO_STATS_FILE = Path.home() / ".edith_pomo_stats.json"
+
+
+def _load_pomo_stats() -> dict:
+    try:
+        return json.loads(_POMO_STATS_FILE.read_text())
+    except Exception:
+        return {"sessions": []}
+
+
+def _save_pomo_stats(stats: dict) -> None:
+    try:
+        _POMO_STATS_FILE.write_text(json.dumps(stats, indent=2))
+    except Exception:
+        pass
+
+
+def _record_pomo_session(work_min: int, cycles_done: int) -> None:
+    if cycles_done == 0:
+        return
+    stats = _load_pomo_stats()
+    stats["sessions"].append({
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "time": datetime.now().strftime("%H:%M"),
+        "work_min": work_min,
+        "cycles": cycles_done,
+        "focus_min": work_min * cycles_done,
+    })
+    _save_pomo_stats(stats)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @tool
 def start_pomodoro(work_minutes: int = 25, break_minutes: int = 5, cycles: int = 4) -> str:
-    """Start a Pomodoro focus timer with desktop notifications.
+    """Start a Pomodoro focus timer with desktop notifications and hologram overlay.
     work_minutes: focus duration per cycle (default 25).
     break_minutes: break duration between cycles (default 5).
     cycles: number of work cycles before stopping (default 4)."""
@@ -187,7 +286,7 @@ def start_pomodoro(work_minutes: int = 25, break_minutes: int = 5, cycles: int =
     total = work_minutes * cycles + break_minutes * (cycles - 1)
     return (
         f"Pomodoro started: {cycles} × {work_minutes}min work + {break_minutes}min breaks. "
-        f"Total: {total} minutes. You'll get desktop notifications."
+        f"Total: {total} minutes."
     )
 
 
@@ -199,6 +298,74 @@ def stop_pomodoro() -> str:
         return "No Pomodoro timer is running."
     _pomo_active = False
     return "Pomodoro timer stopped."
+
+
+@tool
+def get_pomodoro_stats(days: int = 7) -> str:
+    """Get Pomodoro focus statistics for the last N days.
+    days: look-back window (default 7)."""
+    from datetime import timedelta
+    stats = _load_pomo_stats()
+    sessions = stats.get("sessions", [])
+    if not sessions:
+        return "No Pomodoro sessions recorded yet. Start one with start_pomodoro()."
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    recent = [s for s in sessions if s.get("date", "") >= cutoff]
+    if not recent:
+        return f"No Pomodoro sessions in the last {days} days."
+    total_focus = sum(s.get("focus_min", 0) for s in recent)
+    total_cycles = sum(s.get("cycles", 0) for s in recent)
+    avg_per_day = total_focus / max(days, 1)
+    by_date: dict[str, int] = {}
+    for s in recent:
+        d = s.get("date", "")
+        by_date[d] = by_date.get(d, 0) + s.get("focus_min", 0)
+    top_day = max(by_date, key=lambda d: by_date[d]) if by_date else ""
+    return (
+        f"Pomodoro stats — last {days} days:\n"
+        f"• Sessions: {len(recent)}\n"
+        f"• Total cycles: {total_cycles}\n"
+        f"• Total focus: {total_focus} min ({total_focus//60}h {total_focus%60}m)\n"
+        f"• Daily average: {avg_per_day:.0f} min\n"
+        f"• Best day: {top_day} ({by_date.get(top_day, 0)} min)" if top_day else ""
+    )
+
+
+# ── Focus mode ─────────────────────────────────────────────────────────────────
+
+@tool
+def focus_mode(work_minutes: int = 25, break_minutes: int = 5, cycles: int = 4) -> str:
+    """Activate focus mode: starts Pomodoro timer and suppresses email / non-critical alerts.
+    Disables distraction interruptions for the full session duration.
+    work_minutes, break_minutes, cycles: Pomodoro configuration."""
+    global _focus_mode_active, _pomo_active, _pomo_thread
+    if _pomo_active:
+        return "Pomodoro already running. Stop it first or let it finish."
+    _focus_mode_active = True
+    _pomo_active = True
+    _pomo_thread = threading.Thread(
+        target=_pomodoro_run,
+        args=(work_minutes, break_minutes, cycles),
+        daemon=True,
+    )
+    _pomo_thread.start()
+    total = work_minutes * cycles + break_minutes * (cycles - 1)
+    return (
+        f"Focus mode active. {cycles}×{work_minutes}min Pomodoro started. "
+        f"Email and notification alerts suppressed for {total} minutes. "
+        f"Say 'exit focus mode' to stop early."
+    )
+
+
+@tool
+def exit_focus_mode() -> str:
+    """Exit focus mode: stops the active Pomodoro and re-enables all alerts."""
+    global _focus_mode_active, _pomo_active
+    if not _focus_mode_active and not _pomo_active:
+        return "Focus mode is not active."
+    _focus_mode_active = False
+    _pomo_active = False
+    return "Focus mode ended. Pomodoro stopped. All alerts restored."
 
 
 # ── Window Layout Presets ─────────────────────────────────────────────────────
@@ -334,5 +501,42 @@ def daily_briefing() -> str:
         "🌤 To get weather: call get_weather",
         "",
         "◈ EDITH is ready.",
+    ]
+    return "\n".join(lines)
+
+
+@tool
+def daily_summary() -> str:
+    """Generate an end-of-day summary: focus time from Pomodoro sessions today,
+    plus prompts to retrieve tasks and email activity from other tools."""
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    lines = [f"◈ DAILY SUMMARY — {now.strftime('%A, %B %d %Y')}"]
+
+    # Pomodoro stats for today
+    stats = _load_pomo_stats()
+    today_sessions = [s for s in stats.get("sessions", []) if s.get("date") == today]
+    if today_sessions:
+        total_focus = sum(s.get("focus_min", 0) for s in today_sessions)
+        total_cycles = sum(s.get("cycles", 0) for s in today_sessions)
+        lines.append(f"🍅 Focus time: {total_focus} min across {total_cycles} Pomodoro cycles")
+    else:
+        lines.append("🍅 No Pomodoro sessions today")
+
+    # System health snapshot
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.2)
+        mem = psutil.virtual_memory()
+        lines.append(f"💻 System load: CPU {cpu:.0f}%  RAM {mem.percent:.0f}%")
+    except Exception:
+        pass
+
+    lines += [
+        "",
+        "📋 Tasks completed today: call list_tasks with status='done'",
+        "📧 Emails sent today: check Gmail sent folder with list_emails",
+        "",
+        "◈ Great work today. Rest well.",
     ]
     return "\n".join(lines)

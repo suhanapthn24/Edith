@@ -210,6 +210,22 @@ body::after{content:'';position:fixed;left:0;top:-220px;width:100%;height:220px;
 #flip-btn{position:fixed;bottom:9px;left:13px;font-size:.45rem;letter-spacing:.18em;color:rgba(0,245,255,.38);z-index:800;cursor:pointer;background:none;border:1px solid rgba(0,245,255,.15);border-radius:3px;padding:2px 7px;font-family:'Courier New',monospace;transition:color .2s,border-color .2s}
 #flip-btn:hover,#flip-btn.active{color:var(--c1);border-color:rgba(0,245,255,.5);text-shadow:var(--gs)}
 
+/* ── LANGUAGE SELECTOR ── */
+#lang-btn{position:fixed;bottom:9px;left:80px;font-size:.45rem;letter-spacing:.18em;color:rgba(0,245,255,.38);z-index:800;cursor:pointer;background:none;border:1px solid rgba(0,245,255,.15);border-radius:3px;padding:2px 7px;font-family:'Courier New',monospace;transition:color .2s,border-color .2s;user-select:none}
+#lang-btn:hover{color:var(--c1);border-color:rgba(0,245,255,.5);text-shadow:var(--gs)}
+
+/* ── LOCAL STT INDICATOR ── */
+#stt-mode{position:fixed;bottom:9px;left:155px;font-size:.45rem;letter-spacing:.15em;color:rgba(0,245,255,.22);z-index:800;pointer-events:none}
+#stt-mode.local{color:rgba(0,255,136,.4)}
+
+/* ── POMODORO BAR ── */
+#pomo-bar{position:fixed;top:9px;left:50%;transform:translateX(-50%);font-size:.45rem;letter-spacing:.2em;z-index:800;background:rgba(0,6,12,.88);border:1px solid rgba(0,245,255,.25);border-radius:3px;padding:3px 12px;display:none;gap:7px;align-items:center;white-space:nowrap}
+#pomo-bar.active{display:flex}
+#pomo-icon{font-size:.7rem}
+#pomo-info{color:var(--c1);text-shadow:var(--gs)}
+#pomo-bar.break-mode{border-color:rgba(0,255,136,.3)}
+#pomo-bar.break-mode #pomo-info{color:#00ff88;text-shadow:0 0 8px rgba(0,255,136,.6)}
+
 /* ── CHAT STRIP ── */
 #chat-strip{position:fixed;bottom:0;left:0;right:0;padding:10px 24px 13px;background:rgba(0,6,12,.95);border-top:1px solid rgba(0,245,255,.14);backdrop-filter:blur(18px);z-index:650;transform:translateY(100%);transition:transform .32s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;gap:4px}
 #chat-strip.open{transform:translateY(0)}
@@ -229,6 +245,9 @@ body::after{content:'';position:fixed;left:0;top:-220px;width:100%;height:220px;
 <div class="sc bl"></div><div class="sc br"></div>
 <div id="wsbar"><div id="wsdot"></div><span id="wslbl">LIVE</span></div>
 <button id="flip-btn" title="Toggle hologram pyramid flip">⬡ FLIP</button>
+<button id="lang-btn" title="Cycle voice language">EN</button>
+<span id="stt-mode">BROWSER STT</span>
+<div id="pomo-bar"><span id="pomo-icon">🍅</span><span id="pomo-info"></span></div>
 <div id="glbl">GESTURE</div>
 <div id="active-win"></div>
 <div id="alerts"></div>
@@ -485,6 +504,25 @@ function updateTasks(items){
 }
 
 // ═══════════════════════════════════════
+//  POMODORO OVERLAY
+// ═══════════════════════════════════════
+function updatePomodoro(d){
+  const bar=document.getElementById('pomo-bar');
+  const info=document.getElementById('pomo-info');
+  const icon=document.getElementById('pomo-icon');
+  if(!d.active){bar.classList.remove('active','break-mode');return;}
+  const rem=d.remaining_sec||0;
+  const mins=Math.floor(rem/60);
+  const secs=String(rem%60).padStart(2,'0');
+  const state=(d.state||'FOCUS').toUpperCase();
+  const isBreak=state==='BREAK';
+  icon.textContent=isBreak?'⏸':'🍅';
+  info.textContent=`${d.cycle||1}/${d.total||4} · ${mins}:${secs} ${state}`;
+  bar.classList.toggle('break-mode',isBreak);
+  bar.classList.add('active');
+}
+
+// ═══════════════════════════════════════
 //  NEWS
 // ═══════════════════════════════════════
 function updateNews(items){
@@ -605,6 +643,20 @@ function connectWS(){
         updateSystemStats(d);
       } else if(d.type==='alert'){
         showAlert(d.title||'EDITH',d.message||'');
+      } else if(d.type==='speak'){
+        // Proactive speech from backend (calendar reminders, morning briefing, etc.)
+        if(voiceState==='WAKE'||voiceState==='IDLE'){
+          showAlert('EDITH',(d.text||'').substring(0,90));
+          speakResponse(d.text||'');
+        }
+      } else if(d.type==='wake'){
+        // Global hotkey (Ctrl+Shift+E) triggered from backend
+        if(voiceState==='WAKE'||voiceState==='IDLE') startManualListen();
+      } else if(d.type==='stop_speech'){
+        // Ctrl+Shift+S from hotkey daemon
+        window.speechSynthesis?.cancel(); setSpeaking(false); goWakeMode();
+      } else if(d.type==='pomodoro'){
+        updatePomodoro(d);
       }
     }catch(err){}
   };
@@ -907,10 +959,16 @@ document.querySelectorAll('.plbl').forEach(lbl=>{
 //  VOICE CHAT
 // ═══════════════════════════════════════
 const API_BASE = 'http://localhost:8000';
-const SESSION_ID = 'hologram-' + Math.random().toString(36).slice(2,8);
 
-// IDLE → WAKE (continuous mic for wake word)
-// WAKE → ACTIVATING (heard "edith") → COMMAND (one-shot capture) → PROCESSING → SPEAKING → WAKE
+// Persist session across page refreshes — EDITH remembers conversation context
+const SESSION_ID = (() => {
+  const key = 'edith-session-id';
+  let id = localStorage.getItem(key);
+  if (!id) { id = 'edith-' + Date.now().toString(36); localStorage.setItem(key, id); }
+  return id;
+})();
+
+// Voice states: IDLE → WAKE → ACTIVATING → COMMAND → PROCESSING → SPEAKING → WAKE
 let voiceState = 'IDLE';
 let recognition = null;
 const listenBtn = document.getElementById('listening-ring');
@@ -920,20 +978,150 @@ const chatEdithEl = document.getElementById('chat-edith-txt');
 
 function _vstatus(t){ document.getElementById('vstatus').textContent = t; }
 
-// ── Speech recognition ──
+// ── Language selector ──
+const LANGS = [
+  {code:'en-US', label:'EN'},
+  {code:'hi-IN', label:'HI'},
+  {code:'es-ES', label:'ES'},
+  {code:'fr-FR', label:'FR'},
+  {code:'de-DE', label:'DE'},
+  {code:'ja-JP', label:'JA'},
+];
+let _langIdx = (() => {
+  const saved = localStorage.getItem('edith-lang');
+  const idx = LANGS.findIndex(l => l.code === saved);
+  return idx >= 0 ? idx : 0;
+})();
+const langBtn = document.getElementById('lang-btn');
+langBtn.textContent = LANGS[_langIdx].label;
+langBtn.addEventListener('click', () => {
+  _langIdx = (_langIdx + 1) % LANGS.length;
+  const lang = LANGS[_langIdx];
+  localStorage.setItem('edith-lang', lang.code);
+  langBtn.textContent = lang.label;
+  if(recognition) recognition.lang = lang.code;
+});
+
+// ── Local STT (Whisper) ──
+let useLocalSTT = false;
+let _mediaStream = null;
+
+async function checkLocalSTT() {
+  try {
+    const r = await fetch(`${API_BASE}/api/v1/stt/health`);
+    if(r.ok) {
+      const d = await r.json();
+      useLocalSTT = d.available === true;
+    }
+  } catch(e) { useLocalSTT = false; }
+  const el = document.getElementById('stt-mode');
+  if(el) {
+    el.textContent = useLocalSTT ? 'LOCAL STT' : 'BROWSER STT';
+    el.classList.toggle('local', useLocalSTT);
+  }
+}
+
+async function transcribeLocalSTT(blob) {
+  const form = new FormData();
+  form.append('audio', blob, 'audio.webm');
+  form.append('lang', LANGS[_langIdx].code.split('-')[0]);
+  const r = await fetch(`${API_BASE}/api/v1/stt/`, { method:'POST', body: form });
+  if(!r.ok) throw new Error(`STT ${r.status}`);
+  const d = await r.json();
+  return d.text || '';
+}
+
+// MediaRecorder-based local STT capture
+function startLocalSTTCapture() {
+  if(!_mediaStream) { goWakeMode(); return; }
+  const chunks = [];
+  const rec = new MediaRecorder(_mediaStream, { mimeType: 'audio/webm' });
+
+  // Silence detection via AnalyserNode
+  const actx = new AudioContext();
+  const src = actx.createMediaStreamSource(_mediaStream);
+  const analyser = actx.createAnalyser();
+  analyser.fftSize = 512;
+  src.connect(analyser);
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  let silenceStart = null;
+  let stopped = false;
+
+  function checkSilence() {
+    if(stopped) return;
+    analyser.getByteTimeDomainData(buf);
+    const level = Math.max(...buf.map(v => Math.abs(v - 128)));
+    if(level < 6) {
+      if(!silenceStart) silenceStart = Date.now();
+      else if(Date.now() - silenceStart > 1500) stopCapture(); // 1.5s silence
+    } else { silenceStart = null; }
+    if(!stopped) requestAnimationFrame(checkSilence);
+  }
+
+  function stopCapture() {
+    if(stopped) return; stopped = true;
+    try { rec.stop(); } catch(e) {}
+    try { actx.close(); } catch(e) {}
+  }
+
+  // Max 10s recording
+  const maxTimer = setTimeout(stopCapture, 10000);
+
+  rec.ondataavailable = e => { if(e.data.size > 0) chunks.push(e.data); };
+  rec.onstop = async () => {
+    clearTimeout(maxTimer);
+    const blob = new Blob(chunks, { type: 'audio/webm' });
+    try {
+      _vstatus('TRANSCRIBING');
+      const text = await transcribeLocalSTT(blob);
+      if(text) {
+        voiceState = 'PROCESSING';
+        listenBtn.classList.remove('listening');
+        _vstatus('PROCESSING');
+        sendToEdith(text);
+      } else {
+        goWakeMode();
+      }
+    } catch(e) {
+      goWakeMode();
+    }
+  };
+
+  rec.start();
+  requestAnimationFrame(checkSilence);
+}
+
+// ── Speech recognition (browser STT) ──
 function initSpeech(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){ _vstatus('NO STT'); return; }
   recognition = new SR();
-  recognition.lang = 'en-US';
+  recognition.lang = LANGS[_langIdx].code;
 
   recognition.onresult = (e) => {
     if(voiceState === 'WAKE'){
       for(let i = e.resultIndex; i < e.results.length; i++){
-        if(e.results[i][0].transcript.toLowerCase().includes('edith')){
+        const t = e.results[i][0].transcript.toLowerCase();
+        if(t.includes('edith') || t.includes('hey ed') || t.includes('ok ed')){
           voiceState = 'ACTIVATING';
           listenBtn.classList.add('listening');
           showG('◈ HEY EDITH'); _vstatus('ACTIVATED');
+          try{ recognition.stop(); }catch(err){}
+          break;
+        }
+      }
+    } else if(voiceState === 'SPEAKING'){
+      // Interruption watch — cancel TTS if user says "stop", "wait", or "edith"
+      for(let i = e.resultIndex; i < e.results.length; i++){
+        const t = e.results[i][0].transcript.toLowerCase().trim();
+        if(t.includes('stop') || t.includes('wait') || t.includes('edith') || t.includes('hey ed')){
+          window.speechSynthesis?.cancel();
+          setSpeaking(false);
+          showG('◈ INTERRUPTED'); _vstatus('LISTENING');
+          listenBtn.classList.add('listening');
+          voiceState = 'COMMAND';
+          recognition.continuous = false;
+          recognition.interimResults = false;
           try{ recognition.stop(); }catch(err){}
           break;
         }
@@ -953,16 +1141,24 @@ function initSpeech(){
 
   recognition.onend = () => {
     if(voiceState === 'WAKE'){
-      // Auto-restart wake-word listening
       setTimeout(()=>{ try{ recognition.start(); }catch(err){} }, 400);
-    } else if(voiceState === 'ACTIVATING'){
-      // Heard wake word — now capture the command
-      voiceState = 'COMMAND';
-      recognition.continuous = false;
-      recognition.interimResults = false;
+    } else if(voiceState === 'SPEAKING'){
+      // Keep interrupt listener alive while EDITH is speaking
       setTimeout(()=>{ try{ recognition.start(); }catch(err){} }, 200);
+    } else if(voiceState === 'ACTIVATING'){
+      if(useLocalSTT) {
+        voiceState = 'COMMAND';
+        listenBtn.classList.add('listening');
+        _vstatus('RECORDING');
+        startLocalSTTCapture();
+      } else {
+        voiceState = 'COMMAND';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        setTimeout(()=>{ try{ recognition.start(); }catch(err){} }, 200);
+      }
     } else if(voiceState === 'COMMAND'){
-      goWakeMode(); // ended without final result
+      goWakeMode();
     }
   };
 
@@ -978,6 +1174,7 @@ function goWakeMode(){
   _vstatus('WAKE WORD');
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.lang = LANGS[_langIdx].code;
   try{ recognition.start(); }catch(err){}
 }
 
@@ -988,28 +1185,45 @@ function startManualListen(){
   _vstatus('LISTENING');
   window.speechSynthesis?.cancel();
   try{ recognition.stop(); }catch(err){
-    // Not running — skip straight to command mode
-    voiceState = 'COMMAND';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    try{ recognition.start(); }catch(err2){ goWakeMode(); }
+    if(useLocalSTT) {
+      voiceState = 'COMMAND';
+      _vstatus('RECORDING');
+      startLocalSTTCapture();
+    } else {
+      voiceState = 'COMMAND';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      try{ recognition.start(); }catch(err2){ goWakeMode(); }
+    }
   }
 }
 
-// ── TTS ──
+// ── TTS (with interruption support) ──
 function speakResponse(text){
   const synth = window.speechSynthesis;
   if(!synth || !text){ goWakeMode(); return; }
   synth.cancel();
   setSpeaking(true); _vstatus('TRANSMITTING');
+
+  // Enter SPEAKING state so interruption listener activates in recognition.onresult
+  voiceState = 'SPEAKING';
+  if(recognition) {
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    try{ recognition.start(); }catch(e){}
+  }
+
   const utt = new SpeechSynthesisUtterance(text);
   utt.rate = 1.05; utt.pitch = 0.9;
+  utt.lang = LANGS[_langIdx].code;
   const preferred = synth.getVoices().find(v => /google uk english female|karen|samantha|daniel|moira/i.test(v.name));
   if(preferred) utt.voice = preferred;
   utt.onend = utt.onerror = () => {
-    setSpeaking(false);
-    setTimeout(()=> chatStrip.classList.remove('open'), 6000);
-    goWakeMode();
+    if(voiceState === 'SPEAKING') { // only if not already interrupted
+      setSpeaking(false);
+      setTimeout(()=> chatStrip.classList.remove('open'), 6000);
+      goWakeMode();
+    }
   };
   synth.speak(utt);
 }
@@ -1062,7 +1276,9 @@ async function sendToEdith(text){
 // ── Mic button & keyboard ──
 listenBtn.addEventListener('click', () => {
   if(voiceState === 'WAKE' || voiceState === 'IDLE') startManualListen();
-  else if(voiceState === 'COMMAND' || voiceState === 'ACTIVATING'){
+  else if(voiceState === 'SPEAKING'){
+    window.speechSynthesis?.cancel(); setSpeaking(false); goWakeMode();
+  } else if(voiceState === 'COMMAND' || voiceState === 'ACTIVATING'){
     voiceState = 'IDLE'; listenBtn.classList.remove('listening');
     try{ recognition.stop(); }catch(err){}
     setTimeout(goWakeMode, 500);
@@ -1074,12 +1290,28 @@ listenBtn.addEventListener('click', () => {
 window.addEventListener('keydown', e => {
   if(['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
   if(e.key === 'e' || e.key === 'E'){ e.preventDefault(); listenBtn.click(); }
+  if(e.key === 'Escape'){ window.speechSynthesis?.cancel(); setSpeaking(false); goWakeMode(); }
 });
 
 window.addEventListener('load', () => {
   initSpeech();
   window.speechSynthesis?.getVoices(); // preload voice list
-  setTimeout(goWakeMode, 2200);        // start wake-word mode after boot
+
+  // Grab mic stream for local STT (also used by MediaPipe)
+  navigator.mediaDevices?.getUserMedia({ audio: true, video: false })
+    .then(stream => { _mediaStream = stream; })
+    .catch(() => {});
+
+  checkLocalSTT().then(() => setTimeout(goWakeMode, 2200));
+
+  // Auto morning briefing: once per day between 7–10am
+  const now = new Date();
+  const today = now.toDateString();
+  const briefKey = 'edith-briefing-date';
+  if(localStorage.getItem(briefKey) !== today && now.getHours() >= 7 && now.getHours() < 10){
+    localStorage.setItem(briefKey, today);
+    setTimeout(() => sendToEdith('morning briefing'), 12000);
+  }
 });
 </script>
 </body>
