@@ -48,6 +48,63 @@ def _get_idle_seconds() -> float:
         return 0.0
 
 
+_TRACEBACK_PATTERNS = [
+    "Traceback (most recent", "Error:", "Exception:", "SyntaxError:", "TypeError:",
+    "ValueError:", "RuntimeError:", "NameError:", "AttributeError:", "KeyError:",
+    "IndexError:", "ImportError:", "ModuleNotFoundError:",
+]
+
+# ── Screen Time Tracker ───────────────────────────────────────────────────────
+
+_SCREEN_TIME_FILE = Path.home() / ".edith_screentime.json"
+_screen_time_data: dict = {}
+
+
+def _load_screen_time() -> dict:
+    try:
+        return json.loads(_SCREEN_TIME_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_screen_time(data: dict) -> None:
+    try:
+        _SCREEN_TIME_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _screen_time_monitor():
+    global _screen_time_data
+    _screen_time_data = _load_screen_time()
+    save_counter = 0
+    while True:
+        try:
+            date = datetime.now().strftime("%Y-%m-%d")
+            try:
+                import pygetwindow as gw  # type: ignore
+                aw = gw.getActiveWindow()
+                if aw and aw.title.strip():
+                    title = aw.title.strip()
+                    app = (title.split(" - ")[-1].strip() if " - " in title else title.split()[0])[:30]
+                    if date not in _screen_time_data:
+                        _screen_time_data[date] = {}
+                    _screen_time_data[date][app] = _screen_time_data[date].get(app, 0) + 30
+            except ImportError:
+                pass
+            save_counter += 1
+            if save_counter >= 20:  # save every ~10 min
+                _save_screen_time(_screen_time_data)
+                save_counter = 0
+        except Exception:
+            pass
+        time.sleep(30)
+
+
+_screen_time_thread = threading.Thread(target=_screen_time_monitor, daemon=True)
+_screen_time_thread.start()
+
+
 def _spotify_play_context(context: str) -> None:
     """Search and silently play a Spotify playlist suited to context ('focus' or 'break')."""
     queries = {
@@ -86,6 +143,11 @@ def _clipboard_monitor():
             if cur and cur != _last_clip:
                 _clipboard_history.appendleft(cur)
                 _last_clip = cur
+                if len(cur) > 30 and any(p in cur for p in _TRACEBACK_PATTERNS):
+                    _push(_clipboard_alert(
+                        "ERROR DETECTED",
+                        "Clipboard has a stack trace — say 'debug this' for help",
+                    ))
         except Exception:
             pass
         time.sleep(1.5)
@@ -211,6 +273,11 @@ async def _pomo_alert(title: str, msg: str) -> None:
     await trigger_alert(title, msg)
 
 
+async def _clipboard_alert(title: str, msg: str) -> None:
+    from routers.hologram import trigger_alert  # type: ignore
+    await trigger_alert(title, msg)
+
+
 def _toast(title: str, msg: str) -> None:
     ps = f"""
 Add-Type -AssemblyName System.Windows.Forms
@@ -254,6 +321,21 @@ def _pomodoro_run(work_min: int, break_min: int, cycles: int):
                         ))
                     elif idle_sec < 60:
                         idle_alerted = False
+                    if _focus_mode_active:
+                        try:
+                            import pygetwindow as gw  # type: ignore
+                            aw = gw.getActiveWindow()
+                            if aw and aw.title.strip():
+                                tl = aw.title.lower()
+                                _DISTRACTIONS = [
+                                    "reddit", "twitter", "instagram", "facebook",
+                                    "tiktok", "netflix", "twitch", "9gag",
+                                ]
+                                if any(d in tl for d in _DISTRACTIONS):
+                                    aw.minimize()
+                                    _push(_pomo_alert("FOCUS!", f"Blocked: {aw.title[:35]}"))
+                        except Exception:
+                            pass
 
             if not _pomo_active:
                 break
@@ -614,6 +696,40 @@ def generate_standup() -> str:
             pass
 
     return text + "\n\n(Draft copied to clipboard — say 'list my active tasks' to complete it)"
+
+
+@tool
+def get_screen_time(days: int = 1) -> str:
+    """Get a report of which apps were active and for how long.
+    days: look-back window (1 = today, max 7). Screen time is tracked automatically in background."""
+    from datetime import timedelta
+
+    data = _load_screen_time()
+    if not data:
+        return "No screen time data yet — tracking started when EDITH launched."
+
+    days = min(max(1, days), 7)
+    target_dates = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
+
+    totals: dict[str, int] = {}
+    for d in target_dates:
+        for app, secs in data.get(d, {}).items():
+            totals[app] = totals.get(app, 0) + secs
+
+    if not totals:
+        label = "today" if days == 1 else f"the last {days} days"
+        return f"No screen time data for {label}."
+
+    sorted_apps = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+    label = "Today" if days == 1 else f"Last {days} days"
+    lines = [f"Screen time — {label}:"]
+    for app, secs in sorted_apps[:10]:
+        h, m = divmod(secs // 60, 60)
+        lines.append(f"• {app}: {f'{h}h {m}m' if h else f'{m}m'}")
+    total_secs = sum(totals.values())
+    th, tm = divmod(total_secs // 60, 60)
+    lines.append(f"\nTotal tracked: {th}h {tm}m")
+    return "\n".join(lines)
 
 
 @tool

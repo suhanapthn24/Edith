@@ -53,7 +53,7 @@ from agent.tools.productivity import (
     start_pomodoro, stop_pomodoro, get_pomodoro_stats,
     focus_mode, exit_focus_mode,
     save_window_layout, restore_window_layout, list_window_layouts,
-    daily_briefing, daily_summary, generate_standup,
+    daily_briefing, daily_summary, generate_standup, get_screen_time,
 )
 from agent.tools.smart_home import (
     get_home_devices, get_home_state, control_device,
@@ -135,7 +135,7 @@ TOOLS = [
     start_pomodoro, stop_pomodoro, get_pomodoro_stats,
     focus_mode, exit_focus_mode,
     save_window_layout, restore_window_layout, list_window_layouts,
-    daily_briefing, daily_summary, generate_standup,
+    daily_briefing, daily_summary, generate_standup, get_screen_time,
     # Smart home (Home Assistant)
     get_home_devices, get_home_state, control_device,
     set_light_brightness, set_thermostat, run_home_automation,
@@ -210,7 +210,9 @@ Rules:
 27. Pomodoro stats: "how much did I focus" / "pomodoro history" / "focus stats" → get_pomodoro_stats(). Add days=N to change look-back window.
 28. Daily summary: "end of day" / "what did I do today" / "daily summary" → daily_summary(). This gives focus time + prompts to retrieve task/email data.
 29. Smart home: "turn on/off/toggle [device]" → control_device(entity_id, action). "list home devices" → get_home_devices(). "set thermostat to X" → set_thermostat(entity_id, X). "set light to X%" → set_light_brightness(entity_id, X). "run automation X" → run_home_automation(automation_id). "status of [device]" → get_home_state(entity_id). Requires HA_URL + HA_TOKEN in .env.
-30. Standup: "generate standup" / "write my standup" / "daily standup" → generate_standup(). Always follow with list_tasks(status='active') and list_tasks(status='done') to complete the draft.\
+30. Standup: "generate standup" / "write my standup" / "daily standup" → generate_standup(). Always follow with list_tasks(status='active') and list_tasks(status='done') to complete the draft.
+31. Screen time: "screen time" / "what apps did I use" / "how long on X" / "app usage" → get_screen_time(). Use days=7 for weekly view.
+32. Debug: If user says "debug this" / "fix this error" / "what's this error" after an error alert → call get_clipboard() first to retrieve the stack trace, then analyze and explain the fix.\
 """
 
 
