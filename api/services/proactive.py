@@ -17,7 +17,9 @@ from datetime import datetime, timedelta
 
 # ── State ─────────────────────────────────────────────────────────────────────
 _alerted_events: set[str] = set()
+_prep_events: set[str] = set()
 _last_email_count: int = -1
+_extracted_email_subjs: set[str] = set()
 _alerted_overdue: set[int] = set()
 _cpu_high_ticks: int = 0
 _ram_high_ticks: int = 0
@@ -25,6 +27,8 @@ _battery_low_alerted: bool = False
 _battery_critical_alerted: bool = False
 _briefing_date: str = ""
 _eod_date: str = ""
+_standup_date: str = ""
+_journal_date: str = ""
 _seen_phone_notifs: set[str] = set()
 
 
@@ -46,6 +50,226 @@ def _focus_active() -> bool:
         return _focus_mode_active
     except Exception:
         return False
+
+
+# ── Meeting prep (10-min advance) ────────────────────────────────────────────
+
+async def _meeting_prep() -> None:
+    """Fire ~10 min before events: pull related emails + KB notes and brief the user."""
+    global _prep_events
+    try:
+        from agent.tools.google_calendar import list_calendar_events  # type: ignore
+        from agent.tools.gmail import list_emails  # type: ignore
+        from agent.tools.rag import search_knowledge  # type: ignore
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        raw: str = await asyncio.to_thread(list_calendar_events.invoke, {"date": today})
+        if not isinstance(raw, str):
+            return
+
+        now = datetime.now()
+        for line in raw.splitlines():
+            line = line.strip("•-▸ ").strip()
+            if not line or line.lower().startswith("no "):
+                continue
+            if " - " not in line:
+                continue
+            time_str, title = line.split(" - ", 1)
+            try:
+                event_dt = datetime.strptime(f"{today} {time_str.strip()}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                continue
+            diff_min = (event_dt - now).total_seconds() / 60
+            if 9.0 <= diff_min <= 11.0:
+                key = f"prep-{today}-{time_str.strip()}-{title[:40]}"
+                if key in _prep_events:
+                    continue
+                _prep_events.add(key)
+                title_clean = title.strip()
+                context_parts: list[str] = []
+
+                # Pull emails with subject matching first keyword of event title
+                keyword = title_clean.split()[0][:20] if title_clean.split() else ""
+                try:
+                    emails_raw: str = await asyncio.to_thread(
+                        list_emails.invoke,
+                        {"max_results": 3, "query": f"subject:{keyword}"},
+                    )
+                    if isinstance(emails_raw, str) and "not connected" not in emails_raw.lower():
+                        subjs = [l.strip().lstrip("•-▸ ").strip()[:60]
+                                 for l in emails_raw.splitlines()
+                                 if l.strip() and l.strip()[0] in "•-▸"]
+                        if subjs:
+                            context_parts.append(f"Emails: {'; '.join(subjs[:2])}")
+                except Exception:
+                    pass
+
+                # Search knowledge base for event title
+                try:
+                    kb_raw: str = await asyncio.to_thread(
+                        search_knowledge.invoke,
+                        {"query": title_clean, "max_results": 2},
+                    )
+                    if isinstance(kb_raw, str) and "no results" not in kb_raw.lower():
+                        first = next((l.strip() for l in kb_raw.splitlines() if l.strip()), "")
+                        if first:
+                            context_parts.append(f"Notes: {first[:60]}")
+                except Exception:
+                    pass
+
+                summary = " · ".join(context_parts) if context_parts else "No related items found."
+                await _alert("MEETING PREP", f"{title_clean} in 10 min · {summary[:80]}")
+                await _speak(
+                    f"Meeting prep: {title_clean} starts in 10 minutes. {summary[:120]}"
+                )
+    except Exception:
+        pass
+
+
+# ── Auto-task extraction from email subjects ──────────────────────────────────
+
+_ACTION_PHRASES = [
+    "action required", "action needed", "please review", "urgent",
+    "deadline", "reminder:", "follow up", "follow-up", "response needed",
+    "please respond", "approval needed", "review needed", "asap",
+]
+
+
+async def _email_task_extraction(subjects: list[str]) -> None:
+    """Create tasks from email subjects that look like action items."""
+    global _extracted_email_subjs
+    try:
+        from agent.tools.tasks import create_task  # type: ignore
+
+        for subj in subjects[:5]:
+            if subj in _extracted_email_subjs:
+                continue
+            if any(phrase in subj.lower() for phrase in _ACTION_PHRASES):
+                _extracted_email_subjs.add(subj)
+                if len(_extracted_email_subjs) > 500:
+                    _extracted_email_subjs = set(list(_extracted_email_subjs)[-250:])
+                await create_task.ainvoke({
+                    "title": f"[Email] {subj[:70]}",
+                    "priority": "high",
+                    "notes": "Auto-created from action email",
+                })
+                await _alert("AUTO TASK", f"Action email: {subj[:55]}")
+    except Exception:
+        pass
+
+
+# ── Auto window layout on event start ────────────────────────────────────────
+
+async def _auto_apply_layout(event_title: str) -> None:
+    """Restore a saved layout whose name appears in the event title, silently."""
+    try:
+        import json
+        from pathlib import Path
+
+        layouts_file = Path.home() / ".edith_layouts.json"
+        if not layouts_file.exists():
+            return
+        layouts: dict = json.loads(layouts_file.read_text())
+        title_lower = event_title.lower()
+        for layout_name, layout_data in layouts.items():
+            words = layout_name.lower().split()
+            if not any(w in title_lower for w in words):
+                continue
+            try:
+                import pygetwindow as gw  # type: ignore
+                restored = 0
+                for saved in layout_data.get("windows", []):
+                    matches = [w for w in gw.getAllWindows()
+                               if saved["title"].lower() in w.title.lower() and w.title.strip()]
+                    if matches:
+                        w = matches[0]
+                        if w.isMinimized:
+                            w.restore()
+                        w.moveTo(saved["left"], saved["top"])
+                        w.resizeTo(saved["width"], saved["height"])
+                        restored += 1
+                if restored:
+                    await _alert("LAYOUT", f"'{layout_name}' applied for {event_title[:35]}")
+            except ImportError:
+                pass
+            break
+    except Exception:
+        pass
+
+
+# ── Standup reminder ──────────────────────────────────────────────────────────
+
+async def _standup_reminder() -> None:
+    """Fire once at 9am: prompt user to generate standup."""
+    global _standup_date
+    try:
+        from routers.hologram import manager  # type: ignore
+
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        if _standup_date == today or now.hour != 9 or manager.count == 0:
+            return
+        _standup_date = today
+        await _alert("STANDUP TIME", "SAY 'GENERATE STANDUP' TO DRAFT TODAY'S STANDUP")
+        await _speak("It's standup time. Say generate standup to draft your daily update.")
+    except Exception:
+        pass
+
+
+# ── Nightly auto-journal ──────────────────────────────────────────────────────
+
+async def _nightly_journal() -> None:
+    """After 9 pm, compile today's focus + pending tasks into a daily journal file."""
+    global _journal_date
+    try:
+        from pathlib import Path
+
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+        if _journal_date == today or now.hour < 21:
+            return
+
+        from agent.tools.productivity import _load_pomo_stats  # type: ignore
+
+        stats = _load_pomo_stats()
+        today_sessions = [s for s in stats.get("sessions", []) if s.get("date") == today]
+        total_focus = sum(s.get("focus_min", 0) for s in today_sessions)
+        total_cycles = sum(s.get("cycles", 0) for s in today_sessions)
+
+        # Pending tasks
+        pending: list[str] = []
+        try:
+            from agent.tools.tasks import list_tasks  # type: ignore
+            tasks_raw: str = await list_tasks.ainvoke({"status": "active"})
+            if isinstance(tasks_raw, str):
+                for line in tasks_raw.splitlines():
+                    m = re.match(r"^•\s*\[\d+\]\s*[🔴🟡🟢⚪]?\s*(.*?)(?:\s*—|$)", line.strip())
+                    if m:
+                        pending.append(m.group(1).strip()[:60])
+        except Exception:
+            pass
+
+        lines = [
+            f"# Journal — {today}",
+            "",
+            "## Focus",
+            f"- Sessions: {len(today_sessions)}",
+            f"- Cycles: {total_cycles}",
+            f"- Total: {total_focus}min ({total_focus//60}h {total_focus%60}m)",
+            "",
+            "## Pending for tomorrow",
+        ]
+        lines += ([f"- {t}" for t in pending[:8]] if pending else ["- Nothing pending"])
+        lines += ["", f"*EDITH · {now.strftime('%H:%M')}*"]
+
+        journal_dir = Path.home() / ".edith_journal"
+        journal_dir.mkdir(exist_ok=True)
+        (journal_dir / f"{today}.md").write_text("\n".join(lines), encoding="utf-8")
+
+        _journal_date = today
+        await _alert("JOURNAL SAVED", f"~/.edith_journal/{today}.md · {total_focus}min focus today")
+    except Exception:
+        pass
 
 
 # ── Calendar ──────────────────────────────────────────────────────────────────
@@ -79,6 +303,7 @@ async def _calendar_check() -> None:
                     title_clean = title.strip()
                     await _alert("CALENDAR REMINDER", f"Starting in 5 min: {title_clean}")
                     await _speak(f"Heads up — {title_clean} starts in 5 minutes.")
+                    await _auto_apply_layout(title_clean)
     except Exception:
         pass
 
@@ -93,10 +318,11 @@ async def _email_check() -> None:
         from agent.tools.gmail import list_emails  # type: ignore
 
         raw: str = await asyncio.to_thread(
-            list_emails.invoke, {"max_results": 1, "query": "is:unread"}
+            list_emails.invoke, {"max_results": 5, "query": "is:unread"}
         )
         if not isinstance(raw, str):
             return
+
         count = 0
         for line in raw.splitlines():
             if "unread" in line.lower():
@@ -104,10 +330,20 @@ async def _email_check() -> None:
                 if m:
                     count = int(m.group())
                     break
+
+        subjects = [
+            line.strip().lstrip("•-▸ ").strip()[:80]
+            for line in raw.splitlines()
+            if line.strip() and line.strip()[0] in "•-▸"
+        ]
+
         if _last_email_count >= 0 and count > _last_email_count:
             delta = count - _last_email_count
             label = "message" if delta == 1 else "messages"
             await _alert("NEW MAIL", f"{delta} new unread {label}")
+            if subjects:
+                await _email_task_extraction(subjects)
+
         _last_email_count = count
     except Exception:
         pass
@@ -288,9 +524,12 @@ async def run() -> None:
         tick += 1
         try:
             await _morning_check()
+            await _standup_reminder()
+            await _meeting_prep()
             await _calendar_check()
             await _system_health_check()
             await _end_of_day_check()
+            await _nightly_journal()
             if tick % 3 == 0:
                 await _phone_notifications()
             if tick % 5 == 0:

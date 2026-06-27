@@ -5,6 +5,7 @@ text snippets, daily briefing.
 
 import asyncio
 import json
+import re
 import subprocess
 import threading
 import time
@@ -28,6 +29,47 @@ def _push(coro) -> None:
     """Schedule a coroutine on the main event loop from any thread."""
     if _event_loop and not _event_loop.is_closed():
         asyncio.run_coroutine_threadsafe(coro, _event_loop)
+
+
+def _get_idle_seconds() -> float:
+    """Seconds since last keyboard/mouse input (Windows only). Returns 0 on error."""
+    try:
+        import ctypes
+
+        class _LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+        lii = _LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(_LASTINPUTINFO)
+        ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+        millis = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        return max(0.0, millis / 1000.0)
+    except Exception:
+        return 0.0
+
+
+def _spotify_play_context(context: str) -> None:
+    """Search and silently play a Spotify playlist suited to context ('focus' or 'break')."""
+    queries = {
+        "focus": "lofi hip hop focus instrumental study",
+        "break": "upbeat energizing short break",
+    }
+    try:
+        from agent.tools.spotify import _api, _get_device_id  # type: ignore
+
+        query = queries.get(context, "lofi")
+        data = _api("GET", "/search", params={"q": query, "type": "playlist", "limit": 1})
+        items = data.get("playlists", {}).get("items", [])
+        if not items:
+            return
+        uri = items[0].get("uri")
+        if not uri:
+            return
+        device_id = _get_device_id()
+        params = {"device_id": device_id} if device_id else {}
+        _api("PUT", "/me/player/play", params=params, json={"context_uri": uri})
+    except Exception:
+        pass
 
 # ── Clipboard History ─────────────────────────────────────────────────────────
 
@@ -192,7 +234,10 @@ def _pomodoro_run(work_min: int, break_min: int, cycles: int):
             _toast(f"Pomodoro #{cycle}", f"Focus for {work_min} minutes. Go!")
             _push(_pomo_alert(f"POMODORO #{cycle}", f"Focus {work_min} min — go!"))
             _push(_pomo_broadcast(True, cycle, cycles, "FOCUS", work_min * 60))
+            if _focus_mode_active:
+                threading.Thread(target=_spotify_play_context, args=("focus",), daemon=True).start()
 
+            idle_alerted = False
             remaining = work_min * 60
             while remaining > 0 and _pomo_active:
                 sleep_t = min(30, remaining)
@@ -200,6 +245,15 @@ def _pomodoro_run(work_min: int, break_min: int, cycles: int):
                 remaining -= sleep_t
                 if _pomo_active:
                     _push(_pomo_broadcast(True, cycle, cycles, "FOCUS", remaining))
+                    idle_sec = _get_idle_seconds()
+                    if idle_sec >= 180 and not idle_alerted:
+                        idle_alerted = True
+                        _push(_pomo_alert(
+                            "STILL THERE?",
+                            f"No activity for {int(idle_sec) // 60}+ min — still working?"
+                        ))
+                    elif idle_sec < 60:
+                        idle_alerted = False
 
             if not _pomo_active:
                 break
@@ -210,6 +264,8 @@ def _pomodoro_run(work_min: int, break_min: int, cycles: int):
                 _toast("Break time!", f"Take a {break_min}-minute break.")
                 _push(_pomo_alert("BREAK TIME", f"{break_min} min break — relax!"))
                 _push(_pomo_broadcast(True, cycle, cycles, "BREAK", break_min * 60))
+                if _focus_mode_active:
+                    threading.Thread(target=_spotify_play_context, args=("break",), daemon=True).start()
 
                 remaining = break_min * 60
                 while remaining > 0 and _pomo_active:
@@ -503,6 +559,61 @@ def daily_briefing() -> str:
         "◈ EDITH is ready.",
     ]
     return "\n".join(lines)
+
+
+@tool
+def generate_standup() -> str:
+    """Draft a daily standup message using Pomodoro focus data for yesterday and today.
+    Copies the draft to clipboard. The agent should also call list_tasks to fill in
+    completed and planned task sections."""
+    from datetime import timedelta
+
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    stats = _load_pomo_stats()
+    yest_focus = sum(s.get("focus_min", 0) for s in stats.get("sessions", []) if s.get("date") == yesterday)
+    today_focus = sum(s.get("focus_min", 0) for s in stats.get("sessions", []) if s.get("date") == today)
+    today_cycles = sum(s.get("cycles", 0) for s in stats.get("sessions", []) if s.get("date") == today)
+
+    health = ""
+    try:
+        import psutil
+        cpu = psutil.cpu_percent(interval=0.2)
+        mem = psutil.virtual_memory()
+        health = f"  ·  CPU {cpu:.0f}%  RAM {mem.percent:.0f}%"
+    except Exception:
+        pass
+
+    lines = [f"*Standup — {now.strftime('%A, %B %d')}*", ""]
+
+    lines.append("*Yesterday:*")
+    if yest_focus:
+        lines.append(f"• Focused {yest_focus}min ({yest_focus // 60}h {yest_focus % 60}m)")
+    lines.append("• Completed: [call list_tasks status=done to fill in]")
+
+    lines += ["", "*Today:*"]
+    if today_focus:
+        lines.append(f"• Focused so far: {today_cycles} cycles / {today_focus}min{health}")
+    lines.append("• Working on: [call list_tasks status=active to fill in]")
+    lines += ["", "*Blockers:* None"]
+
+    text = "\n".join(lines)
+    try:
+        import pyperclip  # type: ignore
+        pyperclip.copy(text)
+    except Exception:
+        try:
+            safe = text.replace("'", "''")
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Set-Clipboard -Value '{safe}'"],
+                capture_output=True, timeout=8,
+            )
+        except Exception:
+            pass
+
+    return text + "\n\n(Draft copied to clipboard — say 'list my active tasks' to complete it)"
 
 
 @tool
