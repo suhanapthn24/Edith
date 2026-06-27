@@ -31,21 +31,59 @@ A voice-first personal AI assistant. Talk to it like a chief of staff — it han
 ```
 .
 ├── api/                        # FastAPI backend
-│   ├── agent/
-│   │   ├── apex.py             # LangGraph agent + system prompt
-│   │   └── tools/              # Tool implementations (Spotify, Gmail, Maps, ...)
+│   ├── agent/                  # APEX — main ReAct agent
+│   │   ├── apex.py             # LangGraph ReAct graph + system prompt
+│   │   └── tools/              # 80+ tool implementations
+│   │       ├── tasks.py / reminders.py          # Local SQLite
+│   │       ├── google_calendar.py / gmail.py    # Google APIs
+│   │       ├── spotify.py                       # Spotify playback
+│   │       ├── browser.py                       # Web / YouTube / Maps
+│   │       ├── weather.py / google_contacts.py
+│   │       ├── rag.py                           # ChromaDB knowledge base
+│   │       ├── system_nav.py                    # Apps, files, volume, power
+│   │       ├── window_manager.py                # Windows, mouse, keyboard
+│   │       ├── advanced_control.py              # Screen recording, WiFi, print
+│   │       ├── ai_vision.py                     # Screen analysis, OCR
+│   │       ├── system_extras.py                 # Battery, mic, processes
+│   │       ├── productivity.py                  # Pomodoro, snippets, layouts
+│   │       ├── dev_tools.py                     # Docker, Git, HTTP, ports
+│   │       ├── adb_control.py                   # Android phone control
+│   │       └── calls.py                         # Answer / decline calls
+│   ├── agents/                 # Dashboard agents (DB-aware, Ollama)
+│   │   ├── apex_agent.py       # Dashboard-scoped agent
+│   │   └── tools/              # DSA, language, research DB tools
 │   ├── routers/
 │   │   ├── chat.py             # SSE streaming chat endpoint
+│   │   ├── calls.py            # Incoming call notifications
+│   │   ├── hologram.py         # Hologram WebSocket
 │   │   ├── google_auth.py      # Google OAuth flow
-│   │   └── spotify_auth.py     # Spotify OAuth flow
-│   ├── models/                 # SQLAlchemy models
-│   ├── config.py               # Settings (loaded from .env)
+│   │   ├── spotify_auth.py     # Spotify OAuth flow
+│   │   ├── dsa.py / language.py / research.py  # Module CRUD
+│   ├── models/                 # SQLAlchemy ORM (SQLite)
+│   ├── schemas/                # Pydantic schemas
+│   ├── services/
+│   │   ├── call_monitor.py     # Background call-monitoring thread
+│   │   └── sm2.py              # Spaced-repetition (SM-2) algorithm
+│   ├── integrations/           # External API clients
+│   ├── config.py               # Settings (pydantic-settings)
+│   ├── database.py             # SQLAlchemy SQLite engine
 │   └── main.py
-└── edith/                      # Next.js frontend
-    └── src/
-        └── components/
-            └── chat/
-                └── ChatWindow.tsx  # Voice, SSE streaming, UI
+├── edith/                      # Next.js 15 frontend
+│   └── src/
+│       ├── app/
+│       │   ├── (dashboard)/    # Route group with shared layout
+│       │   │   ├── dashboard / calendar / dsa / language /
+│       │   │   ├── research / knowledge / career / skills
+│       │   │   └── layout.tsx  # Sidebar + topbar shell
+│       │   └── layout.tsx / globals.css
+│       ├── components/
+│       │   ├── chat/ChatWindow.tsx   # Voice, SSE streaming, UI
+│       │   ├── dashboard/            # Briefing, streaks, progress widgets
+│       │   └── layout/               # Navbar, sidebar
+│       └── lib/
+├── hologram.html               # Standalone hologram page
+├── knowledge_base/             # Source files for RAG
+└── docker-compose.yml
 ```
 
 ## Getting Started

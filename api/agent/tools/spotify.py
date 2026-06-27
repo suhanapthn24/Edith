@@ -143,23 +143,24 @@ def play_spotify(uri: str) -> str:
 
 @tool
 def control_playback(action: str) -> str:
-    """Control Spotify playback. action must be one of: pause, resume, next, previous."""
+    """Control Spotify playback. action must be one of: pause, stop, resume, next, previous.
+    Use 'stop' or 'pause' to stop playback; 'resume' to continue."""
     try:
         match action:
-            case "pause":
+            case "pause" | "stop":
                 _api("PUT", "/me/player/pause")
-                return "Spotify paused."
-            case "resume":
+                return "Spotify stopped." if action == "stop" else "Spotify paused."
+            case "resume" | "play":
                 _api("PUT", "/me/player/play")
                 return "Spotify resumed."
-            case "next":
+            case "next" | "skip":
                 _api("POST", "/me/player/next")
                 return "Skipped to next track."
-            case "previous":
+            case "previous" | "back":
                 _api("POST", "/me/player/previous")
                 return "Went back to previous track."
             case _:
-                return f"Unknown action '{action}'. Use: pause, resume, next, previous."
+                return f"Unknown action '{action}'. Use: stop, pause, resume, next, previous."
     except RuntimeError:
         return _not_connected()
     except Exception as e:

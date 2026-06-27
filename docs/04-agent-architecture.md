@@ -1,290 +1,206 @@
-# EDITH — Agent Architecture (Ollama-first)
-### v1.1 · June 2026
+# EDITH — Agent Architecture
+### v2.0 · June 2026
 
-## Philosophy: Local-first, Cloud-when-needed
+## Design: Single ReAct Agent + Tools
 
-| Task Type | Model | Cost |
-|---|---|---|
-| Routing, classification, short answers | `llama3.2:3b` (Ollama) | Free |
-| General agent work, explanations, lessons | `llama3.1:8b` (Ollama) | Free |
-| Code explanation, DSA solutions | `codellama:7b` (Ollama) | Free |
-| Embeddings (Knowledge Vault RAG) | `nomic-embed-text` (Ollama) | Free |
-| Long-context PDF processing (papers) | `claude-sonnet-4-6` | ~$0.003/paper |
-| Deep skill gap analysis, complex curriculum | `claude-sonnet-4-6` | On-demand |
+EDITH uses a **single LangGraph ReAct agent** (`agent/apex.py`) rather than a multi-agent hierarchy. All capabilities are exposed as tools; the LLM decides which tools to call and in what order.
 
-**Target: 80%+ of agent calls run locally via Ollama. Claude is invoked only for tasks that genuinely require 200K context or superior reasoning.**
-
----
-
-## Ollama Setup
-
-```bash
-# Install Ollama (Windows/Mac/Linux)
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Pull required models
-ollama pull llama3.2:3b        # fast orchestrator / routing
-ollama pull llama3.1:8b        # general agent work
-ollama pull codellama:7b       # DSA / code explanations
-ollama pull nomic-embed-text   # embeddings (768-dim)
-ollama pull mistral:7b         # optional: alternative general model
-
-# Ollama runs at http://localhost:11434
+```
+User message
+     │
+     ▼
+┌──────────────────────────────────────────────┐
+│             APEX agent  (ReAct loop)          │
+│                                              │
+│  ┌────────────────────────────────────────┐  │
+│  │   LLM  (OpenRouter or Ollama)          │  │
+│  │   Decides: tool call or final answer   │  │
+│  └──────────────┬─────────────────────────┘  │
+│                 │ tool_calls                  │
+│  ┌──────────────▼─────────────────────────┐  │
+│  │   ToolNode  (LangGraph prebuilt)       │  │
+│  │   Executes tool → returns result       │  │
+│  └──────────────┬─────────────────────────┘  │
+│                 │ tool result → back to LLM   │
+│  (loop until no more tool calls)              │
+└──────────────────────────────────────────────┘
+     │
+     ▼
+  SSE stream → ChatWindow.tsx
 ```
 
----
-
-## Agent Definitions
-
-### AgentState (LangGraph TypedDict)
+## LLM Selection
 
 ```python
-from typing import TypedDict, Annotated, Literal
-from langchain_core.messages import BaseMessage
-
-class AgentState(TypedDict):
-    user_id: str
-    user_context: dict          # goals, preferences, timezone
-    module_data: dict           # DB data relevant to the request
-    retrieved_knowledge: list   # RAG results from pgvector
-    messages: list[BaseMessage]
-    output: dict
-    next: str                   # routing decision
-    model_preference: Literal['ollama', 'claude', 'auto']
-```
-
----
-
-### Orchestrator Agent
-- **Model:** `llama3.2:3b` (fast, low-latency routing)
-- **Role:** Receives user intent → classifies → routes to specialist(s) → synthesizes
-- **LangGraph pattern:** Supervisor
-- **Tools:** `classify_intent`, `route_to_agents`, `synthesize_responses`
-
-```python
-ORCHESTRATOR_SYSTEM = """
-You are EDITH, a personal AI chief of staff. Your job is to:
-1. Understand what the user is asking
-2. Identify which specialist agents are needed
-3. Coordinate their responses into a unified answer
-
-Available agents: calendar, language, research, career, dsa, skills, knowledge
-
-Always be concise and actionable. The user is a CS student focused on AI, 
-language learning, research, and career development.
-"""
-```
-
----
-
-### Calendar Agent
-- **Model:** `llama3.1:8b` (Ollama)
-- **Role:** Schedule analysis and smart scheduling
-- **Tools:** `get_events(date_range)`, `find_free_blocks(min_duration_mins)`, `suggest_schedule(activity, duration)`, `create_event(title, start, end)`
-- **External:** Google Calendar API, Microsoft Graph API
-
-```python
-CALENDAR_SYSTEM = """
-You are a scheduling assistant. You have access to the user's calendar events
-and free blocks. Help them use their time purposefully.
-Prefer scheduling deep work in morning slots, language practice in evenings.
-"""
-```
-
----
-
-### Language Agent
-- **Model:** `llama3.1:8b` (Ollama) for lessons and conversation
-- **Upgrade to Claude for:** complex grammar curricula, detailed etymology
-- **Role:** Multilingual tutor and SM-2 curriculum manager
-- **Tools:** `get_vocabulary_due(lang)`, `update_sm2(item_id, grade)`, `generate_lesson(lang, level, topic)`, `run_conversation(lang, topic)`
-
-```python
-LANGUAGE_SYSTEM = """
-You are a multilingual tutor. The user is learning French (A2), Arabic (A1), 
-and Mandarin (A1). Adapt lesson difficulty to their current level.
-For vocabulary review, use the SM-2 grades: 0=blackout, 1=wrong, 2=hard, 
-3=correct, 4=easy, 5=perfect. Generate contextual example sentences.
-"""
-```
-
----
-
-### DSA Agent (NeetCode 150)
-- **Model:** `codellama:7b` (Ollama) — specialized for code
-- **Upgrade to Claude for:** complex DP explanations, advanced graph algorithms
-- **Role:** NeetCode 150 coach and problem recommender
-- **Tools:** `get_neetcode_progress()`, `get_next_problem(category)`, `get_revision_due()`, `explain_approach(problem_id)`, `analyze_weakness()`
-
-```python
-DSA_SYSTEM = """
-You are a DSA coach specializing in the NeetCode 150 roadmap.
-Help the user master LeetCode problems in NeetCode order.
-When explaining solutions, always cover: 
-1. Intuition / pattern recognition
-2. Step-by-step approach
-3. Time and space complexity
-4. Common variations and edge cases
-The user prefers Python solutions.
-"""
-```
-
-**NeetCode 150 Progress Tracking:**
-- Each problem has `is_neetcode_150=True` and `neetcode_order` (1-150)
-- Agent recommends: next unsolved in current category → or revision due → or jump to next category
-- Mastery: category is "mastered" when all problems solved at least once + SM-2 healthy
-
----
-
-### Research Agent
-- **Model:** `claude-sonnet-4-6` (required — PDF context is 50K+ tokens)
-- **Fallback for simple Q&A:** `llama3.1:8b` on already-summarized papers
-- **Role:** Literature review assistant
-- **Tools:** `search_arxiv(query)`, `search_semantic_scholar(query)`, `summarize_paper(paper_id)`, `extract_methodology(paper_id)`, `find_related(paper_id)`
-
-```python
-RESEARCH_SYSTEM = """
-You are an AI research assistant. Help the user understand papers in AI, ML, 
-Graph ML, and related areas. When summarizing:
-- Key contributions (bullet points)
-- Methodology (clear prose)
-- Datasets used
-- Key equations (LaTeX)
-- How they could implement or extend this work
-"""
-```
-
----
-
-### Career Agent
-- **Model:** `llama3.1:8b` (Ollama) for tracking and basic analysis
-- **Upgrade to Claude for:** deep skill gap analysis, resume tailoring
-- **Role:** Job search strategist
-- **Tools:** `get_applications()`, `analyze_resume(resume_id)`, `score_fit(job_desc)`, `find_skill_gaps(target_roles)`, `prep_interview(application_id)`
-
----
-
-### Skills Agent
-- **Model:** `llama3.1:8b` (Ollama)
-- **Role:** Learning path manager for certifications and courses
-- **Tools:** `get_resources(status)`, `suggest_next_resource(goal)`, `generate_study_plan(resource_id)`, `update_progress(resource_id, pct)`
-
-```python
-SKILLS_SYSTEM = """
-You are a learning path advisor. Help the user build skills strategically 
-toward their goals: AI/ML expertise, international internships, Master's program.
-Prioritize certifications and courses with highest ROI for their target roles.
-Current focus areas: AI/ML, Cloud (Azure), Backend (FastAPI), System Design.
-"""
-```
-
----
-
-### Knowledge Agent
-- **Model:** `nomic-embed-text` (Ollama) for embedding + `llama3.1:8b` for generation
-- **Role:** RAG-powered knowledge retrieval
-- **Tools:** `embed_query(text)`, `vector_search(embedding, top_k)`, `answer_from_knowledge(question, chunks)`
-
-```python
-KNOWLEDGE_SYSTEM = """
-You are a knowledge retrieval assistant. Answer the user's questions using 
-ONLY the provided context from their personal knowledge vault.
-If the answer is not in the context, say so clearly.
-Always cite which note/article the information came from.
-"""
-```
-
----
-
-## LangGraph Graph Definition
-
-```python
-from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.postgres import PostgresSaver
-
-def build_EDITH_graph(checkpointer):
-    graph = StateGraph(AgentState)
-
-    # Add agent nodes
-    graph.add_node("orchestrator", orchestrator_node)
-    graph.add_node("calendar", calendar_agent_node)
-    graph.add_node("language", language_agent_node)
-    graph.add_node("research", research_agent_node)
-    graph.add_node("career", career_agent_node)
-    graph.add_node("dsa", dsa_agent_node)
-    graph.add_node("skills", skills_agent_node)
-    graph.add_node("knowledge", knowledge_agent_node)
-    graph.add_node("synthesizer", synthesizer_node)
-
-    # Orchestrator routes conditionally
-    graph.add_conditional_edges(
-        "orchestrator",
-        route_to_agents,
-        {
-            "calendar": "calendar",
-            "language": "language",
-            "research": "research",
-            "career": "career",
-            "dsa": "dsa",
-            "skills": "skills",
-            "knowledge": "knowledge",
-            "synthesizer": "synthesizer",  # direct answer
-        }
+if settings.OPENROUTER_API_KEY:
+    llm = ChatOpenAI(
+        model=settings.OPENROUTER_MODEL,       # "google/gemini-2.5-flash"
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.OPENROUTER_API_KEY,
     )
-
-    # All specialist agents → synthesizer
-    for agent in ["calendar","language","research","career","dsa","skills","knowledge"]:
-        graph.add_edge(agent, "synthesizer")
-
-    graph.add_edge("synthesizer", END)
-    graph.set_entry_point("orchestrator")
-
-    # Persist conversation state in PostgreSQL
-    return graph.compile(checkpointer=checkpointer)
+else:
+    llm = ChatOllama(
+        model=settings.OLLAMA_MODEL,           # "qwen2.5:3b"
+        base_url=settings.OLLAMA_BASE_URL,     # http://localhost:11434
+    )
 ```
+
+| Condition | Model | Notes |
+|---|---|---|
+| OpenRouter key present | `google/gemini-2.5-flash` | Default; fast, long context |
+| No key (offline / free) | `qwen2.5:3b` via Ollama | Fully local |
+| Override via env | any OpenRouter model | e.g. `llama-3.3-70b-instruct:free` |
 
 ---
 
-## Model Selection Logic
+## State
 
 ```python
-def select_model(task_type: str, content_length: int) -> str:
-    """Decide which model to use based on task requirements."""
-    
-    # Always use Claude for:
-    if task_type == "paper_summarization":        return "claude-sonnet-4-6"
-    if task_type == "deep_skill_gap_analysis":    return "claude-sonnet-4-6"
-    if content_length > 50_000:                   return "claude-sonnet-4-6"
-    
-    # Use CodeLlama for:
-    if task_type in ["dsa_explain", "code_review", "solution_walkthrough"]:
-        return "codellama:7b"
-    
-    # Use fast model for:
-    if task_type in ["routing", "classification", "short_answer"]:
-        return "llama3.2:3b"
-    
-    # Default: general Ollama model
-    return "llama3.1:8b"
+class EDITHState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+```
+
+Conversation history accumulates in `messages`. No per-module context — the system prompt covers all domains.
+
+---
+
+## LangGraph Graph
+
+```python
+builder = StateGraph(EDITHState)
+builder.add_node("agent", agent_node)     # LLM call
+builder.add_node("tools", ToolNode(TOOLS))
+builder.set_entry_point("agent")
+builder.add_conditional_edges(
+    "agent", should_continue,
+    {"tools": "tools", END: END}
+)
+builder.add_edge("tools", "agent")        # result feeds back to LLM
+graph = builder.compile()
 ```
 
 ---
 
-## Fine-tuning Plan (Future)
+## Tool Categories (80+ tools)
 
-Once Ollama is running and you have accumulated data:
+### Personal Data (SQLite)
+| Tool | Description |
+|---|---|
+| `create_task` / `list_tasks` / `complete_task` / `update_task` / `delete_task` | Task management |
+| `create_reminder` / `list_reminders` / `complete_reminder` | Reminder management |
 
-1. **Collect training data:** Save all good AI conversations to a JSONL file
-2. **Fine-tune llama3.1:8b** using Ollama's Modelfile system for:
-   - Language lessons in your specific learning style
-   - DSA explanations that match your understanding level
-   - Briefings in your preferred format
-3. **Use Unsloth** (free, fast fine-tuning on consumer GPU) for LoRA fine-tuning
-4. **Load custom model** back into Ollama as `EDITH-tuned:latest`
+### Google Integrations
+| Tool | Description |
+|---|---|
+| `list_calendar_events` / `create_calendar_event` / `delete_calendar_event` | Google Calendar |
+| `list_emails` / `get_email` / `send_email` | Gmail |
+| `search_contacts` / `call_contact` / `message_contact` | Google Contacts |
 
-```bash
-# Ollama Modelfile for personalized model
-FROM llama3.1:8b
-SYSTEM """You are EDITH, personalized AI for [your name]. 
-[Personalization details here after fine-tuning]"""
-```
+### Media & Entertainment
+| Tool | Description |
+|---|---|
+| `search_spotify` / `play_spotify` / `control_playback` | Spotify |
+| `get_current_track` / `get_top_tracks` / `add_to_queue` | Spotify (cont.) |
+
+### Web & Browser
+| Tool | Description |
+|---|---|
+| `open_url` / `search_web` / `search_youtube` | Browser control |
+| `search_maps` / `get_directions` / `reverse_geocode` | Maps & location |
+
+### Weather
+| Tool | Description |
+|---|---|
+| `get_weather` / `get_forecast` | OpenWeatherMap API |
+
+### Knowledge Base (RAG)
+| Tool | Description |
+|---|---|
+| `search_knowledge` | ChromaDB semantic search → answer |
+| `add_note` | Embed and store a new note |
+
+### System Control (Windows)
+| Tool | Description |
+|---|---|
+| `open_app` / `close_app` / `list_running_apps` | App management |
+| `open_file_or_folder` / `find_files` / `download_file` | File system |
+| `create_file` / `delete_file` / `run_command` | File + shell |
+| `set_volume` / `get_volume` / `set_brightness` | Audio + display |
+| `get_system_info` / `lock_screen` / `take_screenshot` | System state |
+| `get_clipboard` / `set_clipboard` / `power_control` | Clipboard + power |
+| `notify` | Windows toast notification |
+
+### Window Manager & Automation
+| Tool | Description |
+|---|---|
+| `list_windows` / `focus_window` / `minimize_window` / `maximize_window` | Window control |
+| `get_active_window` / `move_resize_window` | Window state |
+| `click_at` / `type_text` / `send_hotkey` | Mouse + keyboard |
+
+### AI Vision & OCR
+| Tool | Description |
+|---|---|
+| `ask_about_screen` | Screenshot + LLM visual analysis |
+| `read_screen_text` / `find_text_on_screen` | OCR extraction |
+| `screenshot_region_text` / `analyze_screenshot_file` | Region / file analysis |
+
+### System Extras
+| Tool | Description |
+|---|---|
+| `get_battery_status` | Battery info |
+| `mute_microphone` / `unmute_microphone` / `get_microphone_status` | Mic control |
+| `set_power_plan` / `get_power_plan` | Windows power plan |
+| `kill_process` / `get_process_details` / `list_top_processes` | Process management |
+| `list_audio_devices` | Audio device enumeration |
+
+### Productivity
+| Tool | Description |
+|---|---|
+| `get_clipboard_history` / `paste_from_history` | Clipboard history |
+| `add_snippet` / `expand_snippet` / `list_snippets` | Text snippets |
+| `start_pomodoro` / `stop_pomodoro` | Pomodoro timer |
+| `save_window_layout` / `restore_window_layout` / `list_window_layouts` | Layout manager |
+| `daily_briefing` | Morning summary across all modules |
+
+### Advanced Control
+| Tool | Description |
+|---|---|
+| `start_screen_recording` / `stop_screen_recording` | MP4 to Desktop |
+| `list_wifi_networks` / `get_wifi_status` / `connect_wifi` / `disconnect_wifi` / `toggle_wifi` | WiFi |
+| `print_file` / `list_printers` | Printing |
+
+### Dev Tools
+| Tool | Description |
+|---|---|
+| `docker_list` / `docker_start` / `docker_stop` / `docker_restart` / `docker_logs` / `docker_images` / `docker_compose` | Docker |
+| `list_open_ports` / `check_port` / `ping_host` | Network |
+| `git_status` / `git_log` / `git_diff` / `git_pull` / `git_commit` / `git_branches` | Git |
+| `http_get` / `http_post` / `get_env_info` | HTTP + environment |
+
+### Calls
+| Tool | Description |
+|---|---|
+| `answer_call` / `decline_call` | Handle incoming OS calls |
+
+### Android (ADB)
+| Tool | Description |
+|---|---|
+| `adb_devices` / `adb_connect` / `adb_pair` | Device connection |
+| `adb_home` / `adb_back` / `adb_recent_apps` / `adb_power_button` / `adb_unlock` | Navigation |
+| `adb_tap` / `adb_swipe` / `adb_type` / `adb_keyevent` | Input |
+| `adb_screenshot` / `adb_list_apps` / `adb_open_app` / `adb_close_app` | Screen + apps |
+| `adb_send_sms` / `adb_phone_info` / `adb_push_file` / `adb_pull_file` / `adb_set_volume` | Comms + files |
+
+---
+
+## Dashboard Agent (agents/)
+
+A separate, lighter agent (`agents/apex_agent.py`) serves dashboard module queries. It uses **Ollama only** (no OpenRouter fallback) and has access to a small set of DB-reading tools:
+
+| Tool | Description |
+|---|---|
+| `get_dsa_progress` / `get_dsa_problems_due` / `get_next_dsa_problem` / `get_dsa_weak_categories` | NeetCode 150 |
+| `get_language_progress` / `get_vocab_due` / `get_language_sessions_this_week` | Language learning |
+| `get_research_queue` / `get_research_stats` | Research papers |
+
+This agent is intentionally read-only and module-scoped; it does not have access to system tools.

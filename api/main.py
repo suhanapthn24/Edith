@@ -8,6 +8,7 @@ from routers.chat import router as chat_router
 from routers.google_auth import router as google_auth_router
 from routers.spotify_auth import router as spotify_auth_router
 from routers.calls import router as calls_router
+from routers.hologram import router as hologram_router, hologram_ws
 
 # Import models so SQLAlchemy registers them before create_all
 import models  # noqa: F401
@@ -42,6 +43,8 @@ app.include_router(chat_router)
 app.include_router(google_auth_router)
 app.include_router(spotify_auth_router)
 app.include_router(calls_router)
+app.include_router(hologram_router)
+app.websocket("/ws/hologram")(hologram_ws)
 
 
 @app.get("/health")

@@ -348,6 +348,156 @@ def lock_screen() -> str:
 
 
 @tool
+def get_clipboard() -> str:
+    """Get the current text content of the clipboard."""
+    try:
+        import pyperclip
+        text = pyperclip.paste()
+        return f"Clipboard: {text[:500]}{'...' if len(text) > 500 else ''}" if text else "Clipboard is empty."
+    except ImportError:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                           capture_output=True, text=True, timeout=8)
+        text = r.stdout.strip()
+        return f"Clipboard: {text[:500]}" if text else "Clipboard is empty."
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
+def set_clipboard(text: str) -> str:
+    """Set the clipboard to the given text so the user can paste it anywhere."""
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        return f"Copied {len(text)} characters to clipboard."
+    except ImportError:
+        safe = text.replace("'", "''")
+        subprocess.run(["powershell", "-NoProfile", "-Command", f"Set-Clipboard -Value '{safe}'"],
+                       capture_output=True, timeout=8)
+        return "Copied to clipboard."
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
+def power_control(action: str) -> str:
+    """Control system power state.
+    action must be one of: shutdown, restart, sleep, hibernate, cancel.
+    shutdown/restart have a 30-second delay — use cancel to abort."""
+    action = action.lower().strip()
+    cmds: dict[str, list[str]] = {
+        "shutdown":  ["shutdown", "/s", "/t", "30", "/c", "EDITH: shutting down in 30s"],
+        "restart":   ["shutdown", "/r", "/t", "30", "/c", "EDITH: restarting in 30s"],
+        "sleep":     ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
+        "hibernate": ["shutdown", "/h"],
+        "cancel":    ["shutdown", "/a"],
+    }
+    if action not in cmds:
+        return f"Unknown action '{action}'. Use: shutdown, restart, sleep, hibernate, cancel."
+    try:
+        subprocess.Popen(cmds[action])
+        msgs = {
+            "shutdown":  "Shutting down in 30 seconds. Say 'cancel shutdown' to abort.",
+            "restart":   "Restarting in 30 seconds. Say 'cancel shutdown' to abort.",
+            "sleep":     "Going to sleep.",
+            "hibernate": "Hibernating.",
+            "cancel":    "Shutdown/restart cancelled.",
+        }
+        return msgs[action]
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
+def set_brightness(level: int) -> str:
+    """Set screen brightness. level: 0 (minimum) to 100 (maximum)."""
+    level = max(0, min(100, int(level)))
+    ps = f"""
+$mon = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue
+if ($mon) {{ $mon.WmiSetBrightness(1, {level}); Write-Output "Brightness set to {level}%." }}
+else {{ Write-Output "Brightness API not available on this display." }}
+"""
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() or f"Brightness set to {level}%."
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
+def create_file(path: str, content: str = "") -> str:
+    """Create a new file with optional text content.
+    path: absolute path or filename (defaults to Desktop).
+    Examples: 'notes.txt', 'todo.md', 'C:/Users/Name/Documents/report.txt'"""
+    from pathlib import Path
+    p = Path(path) if Path(path).is_absolute() else Path.home() / "Desktop" / path
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return f"Created: {p}"
+    except Exception as e:
+        return f"Failed to create file: {e}"
+
+
+@tool
+def delete_file(path: str) -> str:
+    """Delete a specific file (will NOT delete folders).
+    path: absolute path or filename on Desktop."""
+    from pathlib import Path
+    p = Path(path) if Path(path).is_absolute() else Path.home() / "Desktop" / path
+    if not p.exists():
+        return f"File not found: {p}"
+    if not p.is_file():
+        return f"'{p}' is a directory — only files can be deleted this way."
+    try:
+        p.unlink()
+        return f"Deleted: {p}"
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
+def run_command(command: str) -> str:
+    """Run a shell command and return its output. Use for scripts, build tools, git, etc.
+    Examples: 'git status', 'npm run dev', 'python script.py', 'dir downloads'"""
+    blocked = ["rm -rf /", "format c", "del /f /s /q c:\\", "rd /s /q c:\\"]
+    if any(b in command.lower() for b in blocked):
+        return "Blocked: potentially destructive command."
+    try:
+        r = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+        out = (r.stdout + r.stderr).strip()
+        return out[:1500] if out else f"Command exited with code {r.returncode}."
+    except subprocess.TimeoutExpired:
+        return "Command timed out after 30 seconds."
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
+def notify(title: str, message: str) -> str:
+    """Show a Windows desktop toast notification.
+    title: notification heading. message: notification body text."""
+    ps = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$n = New-Object System.Windows.Forms.NotifyIcon
+$n.Icon = [System.Drawing.SystemIcons]::Information
+$n.BalloonTipIcon = 'Info'
+$n.BalloonTipTitle = '{title.replace("'", "''")}'
+$n.BalloonTipText = '{message.replace("'", "''")}'
+$n.Visible = $True
+$n.ShowBalloonTip(5000)
+Start-Sleep -Seconds 6
+$n.Dispose()
+"""
+    try:
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
+        return f"Notification sent: {title}"
+    except Exception as e:
+        return f"Failed: {e}"
+
+
+@tool
 def take_screenshot(filename: str = "") -> str:
     """Take a screenshot of the current screen and save it to the Desktop.
     filename: optional — defaults to screenshot_YYYYMMDD_HHMMSS.png"""
