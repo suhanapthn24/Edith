@@ -4,7 +4,7 @@
 ## Week 1–2: Foundation
 - [ ] Next.js 14 scaffold — color palette + fonts configured
 - [ ] FastAPI scaffold with SQLAlchemy async + Alembic
-- [ ] PostgreSQL + pgvector (Docker locally)
+- [ ] SQLite + pgvector (Docker locally)
 - [ ] Clerk auth integrated (web + API JWT middleware)
 - [ ] Base user table + auth sync webhook
 - [ ] Sidebar layout + dashboard shell

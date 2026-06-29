@@ -21,7 +21,7 @@
 | Styling | Tailwind CSS | MUI, Chakra | Full design control, no override fights |
 | Backend | FastAPI Python 3.12 | Django, Express | Async, ideal for SSE + AI tools |
 | ORM | SQLAlchemy 2.0 async | Tortoise, Prisma | Type-safe, works with SQLite, Alembic-ready |
-| Primary DB | SQLite (`EDITH.db`) | PostgreSQL | Zero-config, single-user, portable — no Docker needed for DB |
+| Primary DB | SQLite (`EDITH.db`) | PostgreSQL / SQLite| Zero-config, single-user, portable — no Docker needed for DB |
 | Vector DB | ChromaDB (local, `chroma_db/`) | pgvector, Pinecone | No separate service; embedded in the API process |
 | Auth | Google OAuth 2.0 + Spotify OAuth 2.0 | Clerk, Auth.js | Token files (`google_tokens.json`, `spotify_tokens.json`); simple, no extra service |
 | Primary LLM | OpenRouter (`google/gemini-2.5-flash`) | GPT-4o | Cheap/free credits, long context, swappable model |
@@ -36,7 +36,7 @@
 
 | v1 Plan | v2 Reality | Reason |
 |---|---|---|
-| PostgreSQL + pgvector | SQLite + ChromaDB | No need for a separate DB server for a personal tool |
+| PostgreSQL / SQLite + pgvector | SQLite + ChromaDB | No need for a separate DB server for a personal tool |
 | Supabase Storage | Local `knowledge_base/` + ChromaDB | Simpler; files stay local |
 | Clerk (auth service) | Google + Spotify OAuth token files | Avoids Clerk dependency and user tables |
 | Turborepo monorepo (`apps/`) | Simple two-folder layout (`api/`, `edith/`) | No need for monorepo tooling at this scale |

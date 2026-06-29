@@ -10,7 +10,7 @@ User message
      │
      ▼
 ┌──────────────────────────────────────────────┐
-│             APEX agent  (ReAct loop)          │
+│             EDITH agent  (ReAct loop)          │
 │                                              │
 │  ┌────────────────────────────────────────┐  │
 │  │   LLM  (OpenRouter or Ollama)          │  │

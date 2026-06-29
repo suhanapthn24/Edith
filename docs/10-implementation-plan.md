@@ -11,7 +11,7 @@
 - Top navigation bar with logo (logo.png), all 8 module links, notifications
 - FastAPI project structure: `api/` directory
 - DSA service: router, models (SQLAlchemy), schemas (Pydantic), SM-2 service
-- Docker Compose: PostgreSQL 16 + pgvector
+- Docker Compose: PostgreSQL 16 / SQLite + pgvector
 
 ### 🔧 In Progress
 - Python dependency installation (core packages)
