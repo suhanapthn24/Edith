@@ -39,3 +39,8 @@ comtypes
 pyautogui
 pygetwindow
 pywin32
+
+# Biometric auth (optional — at least one required for voice auth)
+# pip install resemblyzer      (preferred — d-vector speaker embeddings)
+# pip install librosa          (fallback — MFCC-based voice features)
+numpy

@@ -3,12 +3,14 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { Globe } from "lucide-react";
+import { Globe, Lock } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export function Navbar() {
   const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+  const { state: authState, lock } = useAuth();
 
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/auth/google/status`)
@@ -69,6 +71,28 @@ export function Navbar() {
           Google connected
         </div>
       )}
+
+      {/* Biometric auth status + manual lock */}
+      <div className="flex items-center gap-3 ml-3">
+        {authState === "authenticated" && (
+          <button
+            onClick={lock}
+            title="Lock EDITH"
+            className="flex items-center gap-1.5 text-xs text-[#FFF1B5]/25 hover:text-[#FFF1B5]/60 transition-colors font-mono"
+          >
+            <Lock size={12} />
+          </button>
+        )}
+        {authState === "locked" && (
+          <div className="flex items-center gap-1.5">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50" style={{ background: "#FFF1B5" }} />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: "#FFF1B5" }} />
+            </span>
+            <span className="text-[10px] font-mono tracking-widest text-[#FFF1B5]/30 uppercase">Scanning</span>
+          </div>
+        )}
+      </div>
     </nav>
   );
 }

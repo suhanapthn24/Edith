@@ -3,6 +3,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Send, Loader2, Mic, MicOff, Volume2, VolumeX, Zap, X, Radio, MapPin, MapPinOff } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const SESSION_ID = "EDITH-default";
@@ -45,6 +46,7 @@ declare global {
   }
   interface SpeechRecognitionEvent extends Event {
     readonly results: SpeechRecognitionResultList;
+    readonly resultIndex: number;
   }
 }
 
@@ -95,12 +97,16 @@ function playActivationTone() {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ChatWindow() {
+  const { state: authState } = useAuth();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       role: "assistant",
       content:
-        'Hey — I\'m EDITH. I can open apps, control volume, take screenshots, lock your screen, manage tasks and calendar, play music, check weather, and more. Tap the mic or say "Hey EDITH" to start.',
+        authState === "locked" || authState === "checking"
+          ? "Identity verification in progress. I'll respond once I recognize you."
+          : 'Hey — I\'m EDITH. I can open apps, control volume, take screenshots, lock your screen, manage tasks and calendar, play music, check weather, and more. Tap the mic or say "Hey EDITH" to start.',
     },
   ]);
   const [input, setInput] = useState("");
@@ -331,6 +337,19 @@ export function ChatWindow() {
         return;
       }
 
+      // Block all commands until identity is verified
+      if (authState !== "authenticated" && authState !== "unenrolled") {
+        const notice = "I haven't verified your identity yet. Please wait — scanning for you now.";
+        if (voiceEnabledRef.current) {
+          window.speechSynthesis?.cancel();
+          const utt = new SpeechSynthesisUtterance(notice);
+          window.speechSynthesis.speak(utt);
+        }
+        setInput("");
+        if (wakeModeRef.current) setTimeout(() => startWakeListeningRef.current?.(), 1200);
+        return;
+      }
+
       if (loadingRef.current) {
         if (wakeModeRef.current) setTimeout(() => startWakeListeningRef.current?.(), 500);
         return;
@@ -445,7 +464,7 @@ export function ChatWindow() {
         inputRef.current?.focus();
       }
     },
-    [speak]
+    [speak, authState]
   );
 
   useEffect(() => { sendRef.current = send; }, [send]);

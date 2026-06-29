@@ -12,6 +12,7 @@ from routers.calls import router as calls_router
 from routers.hologram import router as hologram_router, hologram_ws
 from routers.stt import router as stt_router
 from routers.vscode import router as vscode_router
+from routers.biometric_auth import router as biometric_router
 
 # Import models so SQLAlchemy registers them before create_all
 import models  # noqa: F401
@@ -56,6 +57,7 @@ app.include_router(calls_router)
 app.include_router(hologram_router)
 app.include_router(stt_router)
 app.include_router(vscode_router)
+app.include_router(biometric_router)
 app.websocket("/ws/hologram")(hologram_ws)
 
 
