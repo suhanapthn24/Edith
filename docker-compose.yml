@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "0000"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-0000}"
       POSTGRES_DB: EDITH
     ports:
       - "5432:5432"
